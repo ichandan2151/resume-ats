@@ -13,7 +13,7 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { fileId, accessToken, fileName, mimeType, jobId } = body;
+    const { fileId, accessToken, fileName, mimeType, jobId, staggerIndex } = body;
 
     if (!fileId) return NextResponse.json({ error: "Missing fileId" }, { status: 400 });
     if (!accessToken) return NextResponse.json({ error: "Missing accessToken" }, { status: 400 });
@@ -53,19 +53,37 @@ export async function POST(req: Request) {
     );
 
     if (result.ok) {
-      // 3. Fire and forget parsing
-      processResumeBackground(
-        auth.user.id,
-        jobId,
-        result.id,
-        fileName,
-        mimeType,
-        bytes,
-        result.bucket,
-        result.path
-      ).catch((err) => {
-        console.error("Google Drive background parsing error:", err);
-      });
+      // 3. Fire and forget parsing, with staggering delay if index provided
+      const delayMs = (typeof staggerIndex === "number" ? staggerIndex : 0) * 10000;
+      if (delayMs > 0) {
+        setTimeout(() => {
+          processResumeBackground(
+            auth.user.id,
+            jobId,
+            result.id,
+            fileName,
+            mimeType,
+            bytes,
+            result.bucket,
+            result.path
+          ).catch((err) => {
+            console.error("Google Drive background parsing error:", err);
+          });
+        }, delayMs);
+      } else {
+        processResumeBackground(
+          auth.user.id,
+          jobId,
+          result.id,
+          fileName,
+          mimeType,
+          bytes,
+          result.bucket,
+          result.path
+        ).catch((err) => {
+          console.error("Google Drive background parsing error:", err);
+        });
+      }
     }
 
     return NextResponse.json({ success: true, data: result });

@@ -43,6 +43,25 @@ export default function JobClient({ jobId }: { jobId: string }) {
   const [googleAuthToken, setGoogleAuthToken] = useState<string | null>(null);
   const [driveImporting, setDriveImporting] = useState(false);
 
+  // Google Drive Bulk Import Queue & Progress UI State
+  const [importState, setImportState] = useState<{
+    status: 'idle' | 'scanning' | 'importing' | 'completed';
+    total: number;
+    current: number;
+    currentFileName: string;
+    successCount: number;
+    failCount: number;
+    errors: Array<{ name: string; error: string }>;
+  }>({
+    status: 'idle',
+    total: 0,
+    current: 0,
+    currentFileName: '',
+    successCount: 0,
+    failCount: 0,
+    errors: [],
+  });
+
   // filters
   const [locationFilter, setLocationFilter] = useState("");
   const [minExpFilter, setMinExpFilter] = useState("");
@@ -185,7 +204,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
   }, []);
 
   // Trigger Google Sign-In and retrieve a fresh OAuth Access Token
-  function getGoogleAuthTokenAndOpenPicker() {
+  function getGoogleAuthTokenAndOpenPicker(mode: 'files' | 'folder') {
     if (!process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || !process.env.NEXT_PUBLIC_GOOGLE_API_KEY) {
       setErr("Google Integration keys are not configured. Please add NEXT_PUBLIC_GOOGLE_CLIENT_ID and NEXT_PUBLIC_GOOGLE_API_KEY to your .env.local.");
       return;
@@ -207,7 +226,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
           }
           if (response.access_token) {
             setGoogleAuthToken(response.access_token);
-            createPicker(response.access_token);
+            createPicker(response.access_token, mode);
           } else {
             setDriveImporting(false);
           }
@@ -222,22 +241,33 @@ export default function JobClient({ jobId }: { jobId: string }) {
     }
   }
 
-  // Create and open the Google Picker dialog
-  function createPicker(accessToken: string) {
+  // Create and open the Google Picker dialog (configured for files multi-select or folder select)
+  function createPicker(accessToken: string, mode: 'files' | 'folder') {
     (window as any).gapi.load("picker", {
       callback: () => {
         try {
-          const view = new (window as any).google.picker.DocsView((window as any).google.picker.ViewId.DOCS);
-          view.setMimeTypes("application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain");
-          
-          const picker = new (window as any).google.picker.PickerBuilder()
-            .addView(view)
+          const pickerBuilder = new (window as any).google.picker.PickerBuilder()
             .setOAuthToken(accessToken)
             .setDeveloperKey(process.env.NEXT_PUBLIC_GOOGLE_API_KEY)
-            .setCallback((data: any) => pickerCallback(data, accessToken))
-            .setTitle("Select Candidate Resume")
-            .build();
-            
+            .setCallback((data: any) => pickerCallback(data, accessToken, mode));
+
+          if (mode === 'files') {
+            const view = new (window as any).google.picker.DocsView((window as any).google.picker.ViewId.DOCS);
+            view.setMimeTypes("application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain");
+            pickerBuilder
+              .addView(view)
+              .enableFeature((window as any).google.picker.Feature.MULTISELECT_ENABLED)
+              .setTitle("Select Candidate Resumes");
+          } else {
+            const view = new (window as any).google.picker.DocsView((window as any).google.picker.ViewId.FOLDERS);
+            view.setMimeTypes("application/vnd.google-apps.folder");
+            view.setSelectFolderEnabled(true);
+            pickerBuilder
+              .addView(view)
+              .setTitle("Select Google Drive Folder");
+          }
+
+          const picker = pickerBuilder.build();
           picker.setVisible(true);
         } catch (e: any) {
           console.error("Picker build failed", e);
@@ -248,42 +278,187 @@ export default function JobClient({ jobId }: { jobId: string }) {
     });
   }
 
-  // Handle the file selected from Google Picker
-  async function pickerCallback(data: any, accessToken: string) {
-    if (data.action === (window as any).google.picker.Action.PICKED) {
-      const doc = data.docs[0];
-      const fileId = doc.id;
-      const fileName = doc.name;
-      const mimeType = doc.mimeType;
+  // Recursively fetch all files within selected Google Drive folder
+  async function fetchAllFilesInFolder(folderId: string, folderName: string, accessToken: string): Promise<any[]> {
+    setImportState({
+      status: 'scanning',
+      total: 0,
+      current: 0,
+      currentFileName: `Scanning folder "${folderName}"...`,
+      successCount: 0,
+      failCount: 0,
+      errors: [],
+    });
+
+    const allFiles: any[] = [];
+    const foldersToScan = [{ id: folderId, name: folderName }];
+
+    while (foldersToScan.length > 0) {
+      const currentFolder = foldersToScan.shift()!;
+      setImportState(prev => ({
+        ...prev,
+        currentFileName: `Scanning folder "${currentFolder.name}"...`,
+      }));
+
+      let pageToken: string | undefined = undefined;
+      do {
+        const query: string = encodeURIComponent(`'${currentFolder.id}' in parents and trashed = false`);
+        const url: string = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=nextPageToken,files(id,name,mimeType)${pageToken ? `&pageToken=${pageToken}` : ''}`;
+        
+        const response: Response = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Failed to list files in folder "${currentFolder.name}": ${errText}`);
+        }
+
+        const data = await response.json();
+        const files = data.files ?? [];
+
+        for (const file of files) {
+          if (file.mimeType === "application/vnd.google-apps.folder") {
+            foldersToScan.push({ id: file.id, name: file.name });
+          } else {
+            // Check if it's a supported file type by extension or mime type
+            const lowerName = file.name.toLowerCase();
+            const isSupported = 
+              file.mimeType === "application/pdf" || 
+              file.mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || 
+              file.mimeType === "text/plain" ||
+              /\.(pdf|docx|txt)$/i.test(lowerName);
+
+            if (isSupported) {
+              allFiles.push(file);
+            }
+          }
+        }
+        pageToken = data.nextPageToken;
+      } while (pageToken);
+    }
+
+    return allFiles;
+  }
+
+  // Handle sequentially uploading multiple files with staggering index
+  async function startFilesImport(docs: any[], accessToken: string) {
+    setImportState({
+      status: 'importing',
+      total: docs.length,
+      current: 0,
+      currentFileName: '',
+      successCount: 0,
+      failCount: 0,
+      errors: [],
+    });
+
+    for (let i = 0; i < docs.length; i++) {
+      const doc = docs[i];
+      setImportState(prev => ({
+        ...prev,
+        current: i + 1,
+        currentFileName: doc.name,
+      }));
 
       try {
-        setDriveImporting(true);
-        
         const res = await fetch("/api/resumes/upload/google-drive", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            fileId,
+            fileId: doc.id,
             accessToken,
-            fileName,
-            mimeType,
+            fileName: doc.name,
+            mimeType: doc.mimeType,
             jobId,
+            staggerIndex: i, // pass staggering delay index
           }),
         });
 
         const json = await res.json();
-        if (!res.ok) throw new Error(json?.error ?? "Google Drive import failed");
+        if (!res.ok) throw new Error(json?.error ?? "Upload failed");
 
-        await refreshResumes();
-        setUploadOpen(false);
-      } catch (e: any) {
-        console.error("Google Drive import failed:", e);
-        setErr(e.message ?? "Google Drive import failed");
-      } finally {
-        setDriveImporting(false);
+        setImportState(prev => ({
+          ...prev,
+          successCount: prev.successCount + 1,
+        }));
+        
+        // Dynamic staggered refreshes so they populate live in table
+        refreshResumes().catch(console.error);
+      } catch (err: any) {
+        console.error("File import failed:", doc.name, err);
+        setImportState(prev => ({
+          ...prev,
+          failCount: prev.failCount + 1,
+          errors: [...prev.errors, { name: doc.name, error: err.message ?? "Unknown error" }],
+        }));
       }
+
+      // 500ms delay between API posts to spread out upload request load
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    setImportState(prev => ({
+      ...prev,
+      status: 'completed',
+    }));
+
+    refreshResumes().catch(console.error);
+  }
+
+  // Handle recursively importing files inside folder
+  async function startFolderImport(folderId: string, folderName: string, accessToken: string) {
+    try {
+      const files = await fetchAllFilesInFolder(folderId, folderName, accessToken);
+      if (files.length === 0) {
+        setImportState({
+          status: 'completed',
+          total: 0,
+          current: 0,
+          currentFileName: 'No supported files (PDF, DOCX, TXT) found in this folder.',
+          successCount: 0,
+          failCount: 0,
+          errors: [],
+        });
+        return;
+      }
+      await startFilesImport(files, accessToken);
+    } catch (err: any) {
+      console.error("Folder scan failed:", err);
+      setImportState({
+        status: 'completed',
+        total: 0,
+        current: 0,
+        currentFileName: '',
+        successCount: 0,
+        failCount: 0,
+        errors: [{ name: folderName, error: err.message ?? "Failed to list folder contents" }],
+      });
+    }
+  }
+
+  // Handle the selection from Google Picker
+  async function pickerCallback(data: any, accessToken: string, mode: 'files' | 'folder') {
+    if (data.action === (window as any).google.picker.Action.PICKED) {
+      const docs = data.docs;
+      if (!docs || docs.length === 0) {
+        setDriveImporting(false);
+        return;
+      }
+
+      setUploadOpen(false); // Close upload modal immediately to let user see progress card
+
+      if (mode === 'folder') {
+        const folder = docs[0];
+        await startFolderImport(folder.id, folder.name, accessToken);
+      } else {
+        await startFilesImport(docs, accessToken);
+      }
+      setDriveImporting(false);
     } else if (data.action === (window as any).google.picker.Action.CANCEL) {
       setDriveImporting(false);
     }
@@ -1090,6 +1265,97 @@ export default function JobClient({ jobId }: { jobId: string }) {
           )}
         </div>
 
+        {/* Google Drive Import Progress Card */}
+        {importState.status !== 'idle' && (
+          <div className="fixed bottom-6 right-6 z-[80] w-96 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-2xl transition-all duration-300">
+            <div className="flex items-start justify-between">
+              <div>
+                <h4 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
+                  {importState.status === 'scanning' ? (
+                    <>
+                      <svg className="h-4 w-4 animate-spin text-zinc-400" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Scanning Google Drive...
+                    </>
+                  ) : importState.status === 'importing' ? (
+                    <>
+                      <svg className="h-4 w-4 animate-spin text-blue-400" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Importing Resumes...
+                    </>
+                  ) : (
+                    <span className="text-emerald-400 flex items-center gap-1.5">
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      Import Completed
+                    </span>
+                  )}
+                </h4>
+                <p className="mt-1 text-xs text-zinc-400 truncate max-w-[280px]">
+                  {importState.currentFileName || 'Preparing...'}
+                </p>
+              </div>
+              {importState.status === 'completed' && (
+                <button
+                  onClick={() => setImportState(prev => ({ ...prev, status: 'idle' }))}
+                  className="rounded-lg bg-zinc-800 p-1 text-zinc-400 hover:text-white cursor-pointer"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+
+            {importState.status !== 'scanning' && importState.total > 0 && (
+              <div className="mt-4">
+                <div className="flex justify-between text-xs text-zinc-400 mb-1.5">
+                  <span>{importState.current} of {importState.total} files</span>
+                  <span>{Math.round((importState.current / importState.total) * 100)}%</span>
+                </div>
+                <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
+                  <div
+                    className="h-full bg-blue-500 transition-all duration-300 rounded-full"
+                    style={{ width: `${(importState.current / importState.total) * 100}%` }}
+                  />
+                </div>
+
+                <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
+                  <div className="rounded-lg bg-zinc-950/40 p-2">
+                    <div className="font-semibold text-zinc-400">Total</div>
+                    <div className="mt-0.5 text-sm font-bold text-zinc-200">{importState.total}</div>
+                  </div>
+                  <div className="rounded-lg bg-emerald-950/20 border border-emerald-900/30 p-2">
+                    <div className="font-semibold text-emerald-400">Success</div>
+                    <div className="mt-0.5 text-sm font-bold text-emerald-300">{importState.successCount}</div>
+                  </div>
+                  <div className="rounded-lg bg-red-950/20 border border-red-900/30 p-2">
+                    <div className="font-semibold text-red-400">Failed</div>
+                    <div className="mt-0.5 text-sm font-bold text-red-300">{importState.failCount}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {importState.errors.length > 0 && (
+              <div className="mt-3 max-h-32 overflow-y-auto rounded-lg bg-zinc-950/50 p-2 text-xs space-y-1 divide-y divide-zinc-800/40">
+                <div className="text-[10px] uppercase font-bold text-red-400 tracking-wider pb-1">Errors ({importState.errors.length})</div>
+                {importState.errors.map((err, i) => (
+                  <div key={i} className="pt-1 text-zinc-400 flex flex-col">
+                    <span className="font-semibold text-zinc-300 truncate">{err.name}</span>
+                    <span className="text-red-400/80 mt-0.5 text-[10px]">{err.error}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <UploadModal
           open={uploadOpen}
           onClose={() => {
@@ -1183,7 +1449,7 @@ function UploadModal(props: {
   driveImporting: boolean;
   gapiLoaded: boolean;
   gisLoaded: boolean;
-  onGoogleDriveImport: () => void;
+  onGoogleDriveImport: (mode: 'files' | 'folder') => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -1205,7 +1471,7 @@ function UploadModal(props: {
           </div>
           <button
             onClick={props.onClose}
-            className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-sm hover:bg-zinc-900/70"
+            className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-sm hover:bg-zinc-900/70 cursor-pointer"
           >
             X
           </button>
@@ -1227,7 +1493,7 @@ function UploadModal(props: {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="inline-flex items-center justify-center rounded-xl bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-white"
+                className="inline-flex items-center justify-center rounded-xl bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-white cursor-pointer"
               >
                 Choose file
               </button>
@@ -1240,7 +1506,7 @@ function UploadModal(props: {
                 <button
                   type="button"
                   onClick={() => props.setFile(null)}
-                  className="rounded-xl border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm hover:bg-zinc-900/60"
+                  className="rounded-xl border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm hover:bg-zinc-900/60 cursor-pointer"
                 >
                   Clear
                 </button>
@@ -1251,7 +1517,7 @@ function UploadModal(props: {
           <button
             type="submit"
             disabled={!props.file || props.uploading}
-            className="w-full rounded-xl bg-zinc-100 px-4 py-3 text-sm font-semibold text-zinc-950 hover:bg-white disabled:opacity-60"
+            className="w-full rounded-xl bg-zinc-100 px-4 py-3 text-sm font-semibold text-zinc-950 hover:bg-white disabled:opacity-60 cursor-pointer"
           >
             {props.uploading ? "Uploading..." : "Upload"}
           </button>
@@ -1262,31 +1528,47 @@ function UploadModal(props: {
             <div className="flex-grow border-t border-zinc-800"></div>
           </div>
 
-          <button
-            type="button"
-            onClick={props.onGoogleDriveImport}
-            disabled={props.driveImporting || !props.gapiLoaded || !props.gisLoaded}
-            className="w-full flex items-center justify-center gap-2.5 rounded-xl border border-zinc-800 bg-zinc-900/30 px-4 py-3 text-sm font-semibold text-zinc-200 hover:bg-zinc-900/60 disabled:opacity-60 transition-colors"
-          >
-            {props.driveImporting ? (
-              <>
-                <svg className="h-4 w-4 animate-spin text-zinc-400" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                Connecting Google Drive...
-              </>
-            ) : (
-              <>
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M19.43 12.98L12.01 2.0199C11.83 1.7099 11.49 1.5199 11.13 1.5199C10.77 1.5199 10.43 1.7099 10.25 2.0199L2.83 12.98C2.65 13.29 2.65 13.67 2.83 13.98L6.56 20.48C6.74 20.79 7.07 20.98 7.43 20.98C7.79 20.98 8.12 20.79 8.3 20.48L15.72 9.5199C15.9 9.2099 16.24 9.0199 16.6 9.0199C16.96 9.0199 17.3 9.2099 17.48 9.5199L21.21 16.02C21.39 16.33 21.39 16.71 21.21 17.02L19.43 20.12C19.25 20.43 18.91 20.62 18.55 20.62C18.19 20.62 17.85 20.43 17.67 20.12L13.94 13.62C13.76 13.31 13.76 12.93 13.94 12.62L15.72 9.5199" fill="#FFC107"/>
-                  <path d="M10.25 2.0199L2.83 12.98C2.65 13.29 2.65 13.67 2.83 13.98L6.56 20.48C6.74 20.79 7.07 20.98 7.43 20.98H14.89L10.25 12.62L12.03 9.5199L10.25 2.0199Z" fill="#00796B"/>
-                  <path d="M12.01 2.0199L19.43 12.98C19.61 13.29 19.61 13.67 19.43 13.98L15.7 20.48C15.52 20.79 15.18 20.98 14.82 20.98H7.36L12.01 12.62L10.23 9.5199L12.01 2.0199Z" fill="#4CAF50"/>
-                </svg>
-                {(!props.gapiLoaded || !props.gisLoaded) ? "Loading Google integration..." : "Import from Google Drive"}
-              </>
-            )}
-          </button>
+          {props.driveImporting ? (
+            <div className="w-full flex items-center justify-center gap-2.5 rounded-xl border border-zinc-800 bg-zinc-900/30 px-4 py-3 text-sm font-semibold text-zinc-400">
+              <svg className="h-4 w-4 animate-spin text-zinc-400" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+              Connecting Google Drive...
+            </div>
+          ) : (!props.gapiLoaded || !props.gisLoaded) ? (
+            <div className="w-full flex items-center justify-center gap-2.5 rounded-xl border border-zinc-800 bg-zinc-900/30 px-4 py-3 text-sm font-semibold text-zinc-500">
+              Loading Google integration...
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="text-xs font-semibold text-zinc-400 px-1">Import from Google Drive:</div>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => props.onGoogleDriveImport('files')}
+                  className="flex items-center justify-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/30 px-3 py-2.5 text-xs font-semibold text-zinc-200 hover:bg-zinc-900/60 transition-colors cursor-pointer"
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M19.43 12.98L12.01 2.0199C11.83 1.7099 11.49 1.5199 11.13 1.5199C10.77 1.5199 10.43 1.7099 10.25 2.0199L2.83 12.98C2.65 13.29 2.65 13.67 2.83 13.98L6.56 20.48C6.74 20.79 7.07 20.98 7.43 20.98C7.79 20.98 8.12 20.79 8.3 20.48L15.72 9.5199C15.9 9.2099 16.24 9.0199 16.6 9.0199C16.96 9.0199 17.3 9.2099 17.48 9.5199L21.21 16.02C21.39 16.33 21.39 16.71 21.21 17.02L19.43 20.12C19.25 20.43 18.91 20.62 18.55 20.62C18.19 20.62 17.85 20.43 17.67 20.12L13.94 13.62C13.76 13.31 13.76 12.93 13.94 12.62L15.72 9.5199" fill="#FFC107"/>
+                    <path d="M10.25 2.0199L2.83 12.98C2.65 13.29 2.65 13.67 2.83 13.98L6.56 20.48C6.74 20.79 7.07 20.98 7.43 20.98H14.89L10.25 12.62L12.03 9.5199L10.25 2.0199Z" fill="#00796B"/>
+                    <path d="M12.01 2.0199L19.43 12.98C19.61 13.29 19.61 13.67 19.43 13.98L15.7 20.48C15.52 20.79 15.18 20.98 14.82 20.98H7.36L12.01 12.62L10.23 9.5199L12.01 2.0199Z" fill="#4CAF50"/>
+                  </svg>
+                  Multiple Files
+                </button>
+                <button
+                  type="button"
+                  onClick={() => props.onGoogleDriveImport('folder')}
+                  className="flex items-center justify-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/30 px-3 py-2.5 text-xs font-semibold text-zinc-200 hover:bg-zinc-900/60 transition-colors cursor-pointer"
+                >
+                  <svg className="h-4 w-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                  Entire Folder
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="text-xs text-zinc-500">
             Tip: Upload a ZIP to add multiple candidates at once.
