@@ -27,6 +27,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
   const [rows, setRows] = useState<ResumeRow[]>([]);
   const [job, setJob] = useState<Job | null>(null);
 
+  const [initialLoad, setInitialLoad] = useState(true);
   const [loadingList, setLoadingList] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -35,6 +36,12 @@ export default function JobClient({ jobId }: { jobId: string }) {
 
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+
+  // Google APIs States
+  const [gapiLoaded, setGapiLoaded] = useState(false);
+  const [gisLoaded, setGisLoaded] = useState(false);
+  const [googleAuthToken, setGoogleAuthToken] = useState<string | null>(null);
+  const [driveImporting, setDriveImporting] = useState(false);
 
   // filters
   const [locationFilter, setLocationFilter] = useState("");
@@ -54,6 +61,9 @@ export default function JobClient({ jobId }: { jobId: string }) {
 
   // delete job modal
   const [deleteJobOpen, setDeleteJobOpen] = useState(false);
+
+  // retry state
+  const [retryingIds, setRetryingIds] = useState<Set<string>>(new Set());
 
   // expanded row
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
@@ -116,6 +126,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
       setErr(e.message ?? "Error");
     } finally {
       setLoadingList(false);
+      setInitialLoad(false);
     }
   }
 
@@ -136,6 +147,147 @@ export default function JobClient({ jobId }: { jobId: string }) {
 
     return () => clearInterval(intervalId);
   }, [rows]);
+
+  // Load Google APIs
+  useEffect(() => {
+    // 1. Load GAPI (Google API client)
+    const gapiScript = document.createElement("script");
+    gapiScript.src = "https://apis.google.com/js/api.js";
+    gapiScript.async = true;
+    gapiScript.defer = true;
+    gapiScript.onload = () => {
+      if ((window as any).gapi) {
+        setGapiLoaded(true);
+      } else {
+        console.error("gapi load failed");
+      }
+    };
+    document.body.appendChild(gapiScript);
+
+    // 2. Load GIS (Google Identity Services)
+    const gisScript = document.createElement("script");
+    gisScript.src = "https://accounts.google.com/gsi/client";
+    gisScript.async = true;
+    gisScript.defer = true;
+    gisScript.onload = () => {
+      if ((window as any).google) {
+        setGisLoaded(true);
+      } else {
+        console.error("gis load failed");
+      }
+    };
+    document.body.appendChild(gisScript);
+
+    return () => {
+      document.body.removeChild(gapiScript);
+      document.body.removeChild(gisScript);
+    };
+  }, []);
+
+  // Trigger Google Sign-In and retrieve a fresh OAuth Access Token
+  function getGoogleAuthTokenAndOpenPicker() {
+    if (!process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || !process.env.NEXT_PUBLIC_GOOGLE_API_KEY) {
+      setErr("Google Integration keys are not configured. Please add NEXT_PUBLIC_GOOGLE_CLIENT_ID and NEXT_PUBLIC_GOOGLE_API_KEY to your .env.local.");
+      return;
+    }
+
+    setDriveImporting(true);
+    setErr(null);
+
+    try {
+      const client = (window as any).google.accounts.oauth2.initTokenClient({
+        client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
+        scope: "https://www.googleapis.com/auth/drive.readonly",
+        callback: async (response: any) => {
+          if (response.error !== undefined) {
+            console.error("GIS Error:", response);
+            setErr(`Google Auth failed: ${response.error}`);
+            setDriveImporting(false);
+            return;
+          }
+          if (response.access_token) {
+            setGoogleAuthToken(response.access_token);
+            createPicker(response.access_token);
+          } else {
+            setDriveImporting(false);
+          }
+        },
+      });
+
+      client.requestAccessToken();
+    } catch (e: any) {
+      console.error("Init token client failed", e);
+      setErr(`Google Picker failed to open: ${e?.message ?? String(e)}`);
+      setDriveImporting(false);
+    }
+  }
+
+  // Create and open the Google Picker dialog
+  function createPicker(accessToken: string) {
+    (window as any).gapi.load("picker", {
+      callback: () => {
+        try {
+          const view = new (window as any).google.picker.DocsView((window as any).google.picker.ViewId.DOCS);
+          view.setMimeTypes("application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain");
+          
+          const picker = new (window as any).google.picker.PickerBuilder()
+            .addView(view)
+            .setOAuthToken(accessToken)
+            .setDeveloperKey(process.env.NEXT_PUBLIC_GOOGLE_API_KEY)
+            .setCallback((data: any) => pickerCallback(data, accessToken))
+            .setTitle("Select Candidate Resume")
+            .build();
+            
+          picker.setVisible(true);
+        } catch (e: any) {
+          console.error("Picker build failed", e);
+          setErr(`Google Picker error: ${e?.message ?? String(e)}`);
+          setDriveImporting(false);
+        }
+      }
+    });
+  }
+
+  // Handle the file selected from Google Picker
+  async function pickerCallback(data: any, accessToken: string) {
+    if (data.action === (window as any).google.picker.Action.PICKED) {
+      const doc = data.docs[0];
+      const fileId = doc.id;
+      const fileName = doc.name;
+      const mimeType = doc.mimeType;
+
+      try {
+        setDriveImporting(true);
+        
+        const res = await fetch("/api/resumes/upload/google-drive", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            fileId,
+            accessToken,
+            fileName,
+            mimeType,
+            jobId,
+          }),
+        });
+
+        const json = await res.json();
+        if (!res.ok) throw new Error(json?.error ?? "Google Drive import failed");
+
+        await refreshResumes();
+        setUploadOpen(false);
+      } catch (e: any) {
+        console.error("Google Drive import failed:", e);
+        setErr(e.message ?? "Google Drive import failed");
+      } finally {
+        setDriveImporting(false);
+      }
+    } else if (data.action === (window as any).google.picker.Action.CANCEL) {
+      setDriveImporting(false);
+    }
+  }
 
   async function upload(e: React.FormEvent) {
     e.preventDefault();
@@ -165,9 +317,40 @@ export default function JobClient({ jobId }: { jobId: string }) {
     }
   }
 
+  async function retryResume(resumeId: string) {
+    setRetryingIds((prev) => new Set(prev).add(resumeId));
+    try {
+      const res = await fetch(`/api/resumes/${resumeId}/retry`, {
+        method: "POST",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? "Retry failed");
+      // Refresh to pick up the "uploaded" status (which triggers polling)
+      await refreshResumes();
+    } catch (e: any) {
+      setErr(e.message ?? "Retry failed");
+    } finally {
+      setRetryingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(resumeId);
+        return next;
+      });
+    }
+  }
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       <div className="mx-auto max-w-6xl px-6 py-10">
+        {initialLoad ? (
+          <div className="flex flex-col items-center justify-center py-32">
+            <svg className="h-8 w-8 animate-spin text-zinc-400" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            <div className="mt-4 text-sm text-zinc-400">Loading job details...</div>
+          </div>
+        ) : (
+        <>
         <div className="flex items-center justify-between">
           <a
             href="/dashboard"
@@ -488,14 +671,38 @@ export default function JobClient({ jobId }: { jobId: string }) {
                               </svg>
                               Processing
                             </span>
+                          ) : (r.status === "failed" || r.status === "error") ? (
+                            <div className="space-y-1.5">
+                              <span className="inline-flex items-center gap-1.5 rounded-full border border-red-900/50 bg-red-950/40 px-3 py-1 text-xs text-red-400">
+                                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                                </svg>
+                                Failed
+                              </span>
+                              {r.parsed_json?.error_code && (
+                                <div className="text-[10px] text-red-400/70 font-mono">
+                                  {r.parsed_json.error_code}
+                                </div>
+                              )}
+                              {r.parsed_json?.retryable && (
+                                <button
+                                  onClick={() => retryResume(r.id)}
+                                  disabled={retryingIds.has(r.id)}
+                                  className="inline-flex items-center gap-1 rounded bg-amber-900/40 px-2 py-1 text-[10px] font-semibold text-amber-200 hover:bg-amber-900/60 disabled:opacity-50 transition-colors"
+                                >
+                                  <svg className={`h-3 w-3 ${retryingIds.has(r.id) ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                  </svg>
+                                  {retryingIds.has(r.id) ? "Retrying..." : "Retry"}
+                                </button>
+                              )}
+                            </div>
                           ) : (
                             <span
                               className={`rounded-full border px-3 py-1 text-xs ${
                                 r.status === "scored"
                                   ? "border-emerald-900/50 bg-emerald-950/40 text-emerald-400"
-                                  : r.status === "failed"
-                                    ? "border-red-900/50 bg-red-950/40 text-red-400"
-                                    : "border-zinc-800 bg-zinc-950/40 text-zinc-300"
+                                  : "border-zinc-800 bg-zinc-950/40 text-zinc-300"
                               }`}
                             >
                               {r.status}
@@ -532,6 +739,15 @@ export default function JobClient({ jobId }: { jobId: string }) {
                             >
                               View
                             </a>
+                            {(r.status === "failed" || r.status === "error") && r.parsed_json?.retryable && (
+                              <button
+                                onClick={() => retryResume(r.id)}
+                                disabled={retryingIds.has(r.id)}
+                                className="rounded bg-amber-900/40 px-2 py-1 text-xs font-semibold text-amber-200 hover:bg-amber-900/60 disabled:opacity-50"
+                              >
+                                {retryingIds.has(r.id) ? "..." : "Retry"}
+                              </button>
+                            )}
                             <button
                               onClick={() => {
                                 setDeleteCandidate(r);
@@ -545,7 +761,55 @@ export default function JobClient({ jobId }: { jobId: string }) {
                           </div>
                         </td>
                       </tr>
-                      {expandedRow === r.id && (
+                      {/* Error detail row for failed resumes */}
+                      {(r.status === "failed" || r.status === "error") && r.parsed_json?.error && expandedRow === r.id && (
+                        <tr key={`${r.id}-err`} className="bg-red-950/10">
+                          <td colSpan={6} className="px-5 py-0">
+                            <div className="border-l-2 border-red-900/50 pl-6 py-5">
+                              <div className="rounded-xl border border-red-900/30 bg-red-950/20 p-4">
+                                <div className="flex items-start gap-3">
+                                  <div className="mt-0.5 rounded-lg bg-red-900/30 p-1.5">
+                                    <svg className="h-4 w-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                                    </svg>
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <h4 className="text-sm font-semibold text-red-300">Parsing Failed</h4>
+                                      {r.parsed_json.error_code && (
+                                        <span className="rounded bg-red-900/40 px-1.5 py-0.5 text-[10px] font-mono text-red-300/80">
+                                          {r.parsed_json.error_code}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="mt-2 text-sm text-zinc-400 leading-relaxed">
+                                      {r.parsed_json.error}
+                                    </p>
+                                    {r.parsed_json.retryable && (
+                                      <button
+                                        onClick={() => retryResume(r.id)}
+                                        disabled={retryingIds.has(r.id)}
+                                        className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-amber-900/40 px-3 py-1.5 text-xs font-semibold text-amber-200 hover:bg-amber-900/60 disabled:opacity-50 transition-colors"
+                                      >
+                                        <svg className={`h-3.5 w-3.5 ${retryingIds.has(r.id) ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                        </svg>
+                                        {retryingIds.has(r.id) ? "Retrying..." : "Retry Parsing"}
+                                      </button>
+                                    )}
+                                    {!r.parsed_json.retryable && (
+                                      <p className="mt-2 text-xs text-zinc-500">
+                                        This error is not retryable. Please check your configuration or re-upload the resume.
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      {expandedRow === r.id && r.status !== "failed" && r.status !== "error" && (
                         <tr key={`${r.id}-det`} className="bg-zinc-900/10">
                           <td colSpan={6} className="px-5 py-0">
                             <div className="border-l border-zinc-800 pl-6 py-6 space-y-6">
@@ -836,6 +1100,10 @@ export default function JobClient({ jobId }: { jobId: string }) {
           setFile={setFile}
           uploading={uploading}
           onUpload={upload}
+          driveImporting={driveImporting}
+          gapiLoaded={gapiLoaded}
+          gisLoaded={gisLoaded}
+          onGoogleDriveImport={getGoogleAuthTokenAndOpenPicker}
         />
 
         <JobDetailsModal
@@ -876,7 +1144,10 @@ export default function JobClient({ jobId }: { jobId: string }) {
           open={deleteJobOpen}
           onClose={() => setDeleteJobOpen(false)}
           jobId={jobId}
+          onDeleted={() => { window.location.href = "/dashboard"; }}
         />
+        </>
+        )}
       </div>
     </div>
   );
@@ -909,6 +1180,10 @@ function UploadModal(props: {
   setFile: (f: File | null) => void;
   uploading: boolean;
   onUpload: (e: React.FormEvent) => Promise<void>;
+  driveImporting: boolean;
+  gapiLoaded: boolean;
+  gisLoaded: boolean;
+  onGoogleDriveImport: () => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -979,6 +1254,38 @@ function UploadModal(props: {
             className="w-full rounded-xl bg-zinc-100 px-4 py-3 text-sm font-semibold text-zinc-950 hover:bg-white disabled:opacity-60"
           >
             {props.uploading ? "Uploading..." : "Upload"}
+          </button>
+
+          <div className="relative my-4 flex py-1 items-center">
+            <div className="flex-grow border-t border-zinc-800"></div>
+            <span className="flex-shrink mx-4 text-zinc-500 text-xs uppercase tracking-wider font-semibold">Or</span>
+            <div className="flex-grow border-t border-zinc-800"></div>
+          </div>
+
+          <button
+            type="button"
+            onClick={props.onGoogleDriveImport}
+            disabled={props.driveImporting || !props.gapiLoaded || !props.gisLoaded}
+            className="w-full flex items-center justify-center gap-2.5 rounded-xl border border-zinc-800 bg-zinc-900/30 px-4 py-3 text-sm font-semibold text-zinc-200 hover:bg-zinc-900/60 disabled:opacity-60 transition-colors"
+          >
+            {props.driveImporting ? (
+              <>
+                <svg className="h-4 w-4 animate-spin text-zinc-400" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Connecting Google Drive...
+              </>
+            ) : (
+              <>
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M19.43 12.98L12.01 2.0199C11.83 1.7099 11.49 1.5199 11.13 1.5199C10.77 1.5199 10.43 1.7099 10.25 2.0199L2.83 12.98C2.65 13.29 2.65 13.67 2.83 13.98L6.56 20.48C6.74 20.79 7.07 20.98 7.43 20.98C7.79 20.98 8.12 20.79 8.3 20.48L15.72 9.5199C15.9 9.2099 16.24 9.0199 16.6 9.0199C16.96 9.0199 17.3 9.2099 17.48 9.5199L21.21 16.02C21.39 16.33 21.39 16.71 21.21 17.02L19.43 20.12C19.25 20.43 18.91 20.62 18.55 20.62C18.19 20.62 17.85 20.43 17.67 20.12L13.94 13.62C13.76 13.31 13.76 12.93 13.94 12.62L15.72 9.5199" fill="#FFC107"/>
+                  <path d="M10.25 2.0199L2.83 12.98C2.65 13.29 2.65 13.67 2.83 13.98L6.56 20.48C6.74 20.79 7.07 20.98 7.43 20.98H14.89L10.25 12.62L12.03 9.5199L10.25 2.0199Z" fill="#00796B"/>
+                  <path d="M12.01 2.0199L19.43 12.98C19.61 13.29 19.61 13.67 19.43 13.98L15.7 20.48C15.52 20.79 15.18 20.98 14.82 20.98H7.36L12.01 12.62L10.23 9.5199L12.01 2.0199Z" fill="#4CAF50"/>
+                </svg>
+                {(!props.gapiLoaded || !props.gisLoaded) ? "Loading Google integration..." : "Import from Google Drive"}
+              </>
+            )}
           </button>
 
           <div className="text-xs text-zinc-500">
@@ -1286,16 +1593,14 @@ function DeleteJobConfirmationModal({
   open,
   onClose,
   jobId,
+  onDeleted,
 }: {
   open: boolean;
   onClose: () => void;
   jobId: string;
+  onDeleted: () => void;
 }) {
   const [deleting, setDeleting] = useState(false);
-  const router =
-    typeof window !== "undefined"
-      ? require("next/navigation").useRouter()
-      : null;
 
   if (!open) return null;
 
@@ -1308,8 +1613,7 @@ function DeleteJobConfirmationModal({
       if (!res.ok) throw new Error("Failed to delete job");
 
       // Redirect to dashboard
-      if (router) router.push("/dashboard");
-      else window.location.href = "/dashboard";
+      onDeleted();
     } catch (error) {
       console.error(error);
       alert("Failed to delete job");

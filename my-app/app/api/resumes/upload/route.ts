@@ -70,7 +70,7 @@ async function extractText(
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function handleOneUpload(
+export async function handleOneUpload(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
   userId: string,
   jobId: string,
@@ -114,7 +114,7 @@ async function handleOneUpload(
 }
 
 // Background processing function (runs after the HTTP response is sent)
-async function processResumeBackground(
+export async function processResumeBackground(
   userId: string,
   jobId: string,
   id: string,
@@ -156,11 +156,28 @@ async function processResumeBackground(
     const raw = await extractText(fileName, mimeType, bytes);
     const extracted_text = cleanText(raw);
 
-    const geminiData = await parseResumeWithGemini(extracted_text, jobContext);
+    const geminiResult = await parseResumeWithGemini(extracted_text, jobContext);
 
-    if (!geminiData) {
-      throw new Error("Gemini parsing failed after retries.");
+    if (!geminiResult.success) {
+      // Store the structured error for the frontend
+      await supabaseAdmin
+        .from("resumes")
+        .update({
+          storage_bucket: bucket,
+          storage_path: path,
+          extracted_text,
+          status: "error",
+          parsed_json: {
+            error: geminiResult.message,
+            error_code: geminiResult.code,
+            retryable: geminiResult.retryable,
+          },
+        })
+        .eq("id", id);
+      return;
     }
+
+    const geminiData = geminiResult.data;
 
     const finalScore = geminiData.scoring?.score ?? 0;
     const finalBreakdown = geminiData.scoring?.breakdown ?? {
@@ -194,8 +211,12 @@ async function processResumeBackground(
       .update({
         storage_bucket: bucket,
         storage_path: path,
-        status: "failed",
-        parsed_json: { error: err?.message ?? String(err) },
+        status: "error",
+        parsed_json: {
+          error: err?.message ?? String(err),
+          error_code: "UNKNOWN",
+          retryable: true,
+        },
       })
       .eq("id", id);
   }

@@ -2,13 +2,173 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
+// Structured error type for detailed failure reporting
+export type GeminiErrorCode =
+  | "MISSING_API_KEY"
+  | "INVALID_API_KEY"
+  | "RATE_LIMIT"
+  | "QUOTA_EXCEEDED"
+  | "SERVER_ERROR"
+  | "TIMEOUT"
+  | "SAFETY_BLOCKED"
+  | "INVALID_RESPONSE"
+  | "NETWORK_ERROR"
+  | "UNKNOWN";
+
+export type GeminiError = {
+  success: false;
+  code: GeminiErrorCode;
+  message: string;
+  retryable: boolean;
+};
+
+export type GeminiSuccess = {
+  success: true;
+  data: any;
+};
+
+export type GeminiResult = GeminiSuccess | GeminiError;
+
+function classifyError(error: any): GeminiError {
+  const status = error?.status ?? error?.statusCode;
+  const message = error?.message ?? String(error);
+  const lowerMsg = message.toLowerCase();
+
+  // API key errors (400 or 403 with specific messages)
+  if (
+    status === 400 &&
+    (lowerMsg.includes("api key") || lowerMsg.includes("api_key"))
+  ) {
+    return {
+      success: false,
+      code: "INVALID_API_KEY",
+      message:
+        "The Gemini API key is invalid or malformed. Please check your GEMINI_API_KEY in .env.local.",
+      retryable: false,
+    };
+  }
+
+  if (status === 403) {
+    if (lowerMsg.includes("api key") || lowerMsg.includes("api_key_invalid")) {
+      return {
+        success: false,
+        code: "INVALID_API_KEY",
+        message:
+          "The Gemini API key is not authorized. Verify your key has the correct permissions.",
+        retryable: false,
+      };
+    }
+    return {
+      success: false,
+      code: "INVALID_API_KEY",
+      message: `Access denied (403): ${message}`,
+      retryable: false,
+    };
+  }
+
+  // Rate limiting / quota
+  if (status === 429) {
+    if (lowerMsg.includes("quota") || lowerMsg.includes("resource_exhausted")) {
+      return {
+        success: false,
+        code: "QUOTA_EXCEEDED",
+        message:
+          "Gemini API quota has been exceeded. Wait a few minutes or upgrade your API plan.",
+        retryable: true,
+      };
+    }
+    return {
+      success: false,
+      code: "RATE_LIMIT",
+      message:
+        "Too many requests to Gemini API. The system retried automatically but the rate limit persists. Try again in a minute.",
+      retryable: true,
+    };
+  }
+
+  // Server errors
+  if (status === 500 || status === 502 || status === 503) {
+    return {
+      success: false,
+      code: "SERVER_ERROR",
+      message: `Gemini API server error (${status}). Google's servers may be experiencing issues. Try again shortly.`,
+      retryable: true,
+    };
+  }
+
+  if (status === 504 || lowerMsg.includes("timeout") || lowerMsg.includes("deadline")) {
+    return {
+      success: false,
+      code: "TIMEOUT",
+      message:
+        "The request to Gemini API timed out. The resume might be too large or the server is slow. Try again.",
+      retryable: true,
+    };
+  }
+
+  // Safety / content filter
+  if (
+    lowerMsg.includes("safety") ||
+    lowerMsg.includes("blocked") ||
+    lowerMsg.includes("finish_reason")
+  ) {
+    return {
+      success: false,
+      code: "SAFETY_BLOCKED",
+      message:
+        "Gemini's safety filters blocked this content. The resume may contain content flagged by the AI.",
+      retryable: false,
+    };
+  }
+
+  // Network errors
+  if (
+    lowerMsg.includes("fetch failed") ||
+    lowerMsg.includes("econnrefused") ||
+    lowerMsg.includes("enotfound") ||
+    lowerMsg.includes("network")
+  ) {
+    return {
+      success: false,
+      code: "NETWORK_ERROR",
+      message:
+        "Could not connect to Gemini API. Check your internet connection and try again.",
+      retryable: true,
+    };
+  }
+
+  // JSON parse errors (invalid response from Gemini)
+  if (lowerMsg.includes("json") || lowerMsg.includes("unexpected token")) {
+    return {
+      success: false,
+      code: "INVALID_RESPONSE",
+      message:
+        "Gemini returned an invalid response that couldn't be parsed. Try again — this is usually a one-off issue.",
+      retryable: true,
+    };
+  }
+
+  // Fallback
+  return {
+    success: false,
+    code: "UNKNOWN",
+    message: `An unexpected error occurred: ${message}`,
+    retryable: true,
+  };
+}
+
 export async function parseResumeWithGemini(
   text: string,
   jobContext: string = "Not provided",
-) {
+): Promise<GeminiResult> {
   if (!process.env.GEMINI_API_KEY) {
-    console.warn("GEMINI_API_KEY is not set. Skipping Gemini parsing.");
-    return null;
+    return {
+      success: false,
+      code: "MISSING_API_KEY",
+      message:
+        "GEMINI_API_KEY is not configured. Add it to your .env.local file.",
+      retryable: false,
+    };
   }
 
   const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
@@ -95,18 +255,22 @@ export async function parseResumeWithGemini(
 
   const maxRetries = 3;
   let delay = 5000; // start with 5 seconds
+  let lastError: any = null;
 
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
     try {
       const result = await model.generateContent(prompt);
       const response = await result.response;
-      const text = response.text();
+      const responseText = response.text();
 
       // Clean up markdown code blocks if present
-      const jsonStr = text.replace(/```json\n?|\n?```/g, "").trim();
-      return JSON.parse(jsonStr);
+      const jsonStr = responseText.replace(/```json\n?|\n?```/g, "").trim();
+      const parsed = JSON.parse(jsonStr);
+      return { success: true, data: parsed };
     } catch (error: any) {
-      // 429 means Rate Limit / Quota Exceeded
+      lastError = error;
+
+      // 429 means Rate Limit / Quota Exceeded — retry with backoff
       if (attempt <= maxRetries && error?.status === 429) {
         let waitTime = delay;
         // Try to parse Google RPC RetryInfo for exact wait time
@@ -128,11 +292,21 @@ export async function parseResumeWithGemini(
         );
         await new Promise((resolve) => setTimeout(resolve, waitTime));
         delay *= 2; // Exponential backoff for the default fallback delay
+      } else if (attempt <= maxRetries && (error?.status === 500 || error?.status === 502 || error?.status === 503)) {
+        // Server errors are also retryable
+        console.warn(
+          `Gemini server error (${error.status}). Retrying in ${delay / 1000}s... (Attempt ${attempt} of ${maxRetries})`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        delay *= 2;
       } else {
+        // Non-retryable or exhausted retries
         console.error("Gemini parsing failed:", error);
-        return null;
+        return classifyError(error);
       }
     }
   }
-  return null;
+
+  // Exhausted all retries
+  return classifyError(lastError);
 }
