@@ -26,6 +26,41 @@ type Job = {
 export default function JobClient({ jobId }: { jobId: string }) {
   const [rows, setRows] = useState<ResumeRow[]>([]);
   const [job, setJob] = useState<Job | null>(null);
+  const [showTour, setShowTour] = useState(false);
+  const [tourStep, setTourStep] = useState(0);
+
+  useEffect(() => {
+    const tourCompleted = localStorage.getItem("patternix_job_onboarding_completed");
+    if (!tourCompleted) {
+      setShowTour(true);
+    }
+  }, []);
+
+  const handleNextTourStep = () => {
+    if (tourStep < 5) {
+      setTourStep(prev => prev + 1);
+    } else {
+      handleCompleteTour();
+    }
+  };
+
+  const handlePrevTourStep = () => {
+    if (tourStep > 0) {
+      setTourStep(prev => prev - 1);
+    }
+  };
+
+  const handleCompleteTour = () => {
+    localStorage.setItem("patternix_job_onboarding_completed", "true");
+    setShowTour(false);
+    setTourStep(0);
+  };
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [serverAvgScore, setServerAvgScore] = useState<number | null>(null);
+  const limit = 30;
+  const from = (page - 1) * limit;
 
   const [initialLoad, setInitialLoad] = useState(true);
   const [loadingList, setLoadingList] = useState(false);
@@ -67,6 +102,38 @@ export default function JobClient({ jobId }: { jobId: string }) {
   const [minExpFilter, setMinExpFilter] = useState("");
   const [visaFilter, setVisaFilter] = useState("");
   const [workAuthFilter, setWorkAuthFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+
+  const hasActiveFilters = useMemo(() => {
+    return !!(
+      locationFilter.trim() ||
+      minExpFilter.trim() ||
+      visaFilter.trim() ||
+      workAuthFilter.trim() ||
+      statusFilter.trim()
+    );
+  }, [locationFilter, minExpFilter, visaFilter, workAuthFilter, statusFilter]);
+
+  function handleClearFilters() {
+    setLocationFilter("");
+    setMinExpFilter("");
+    setVisaFilter("");
+    setWorkAuthFilter("");
+    setStatusFilter("");
+    setPage(1);
+    
+    const params = new URLSearchParams();
+    params.set("page", "1");
+    fetch(`/api/jobs/${jobId}/resumes?${params.toString()}`)
+      .then(res => res.json())
+      .then(json => {
+        setRows(json.data ?? []);
+        setTotalCount(json.totalCount ?? 0);
+        setTotalPages(json.totalPages ?? 1);
+        setServerAvgScore(json.avgScore ?? null);
+      })
+      .catch(console.error);
+  }
 
   // edit modal
   const [editCandidate, setEditCandidate] = useState<ResumeRow | null>(null);
@@ -92,14 +159,8 @@ export default function JobClient({ jobId }: { jobId: string }) {
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
-  const total = rows.length;
-  const avgScore = useMemo(() => {
-    const scores = rows
-      .map((r) => r.score)
-      .filter((s): s is number => typeof s === "number");
-    if (scores.length === 0) return null;
-    return scores.reduce((a, b) => a + b, 0) / scores.length;
-  }, [rows]);
+  const total = totalCount;
+  const avgScore = serverAvgScore;
 
   const sortedRows = useMemo(() => {
     if (!sortField) return rows;
@@ -120,7 +181,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
     setJob(json.data);
   }
 
-  async function refreshResumes() {
+  async function refreshResumes(targetPage = page) {
     const params = new URLSearchParams();
     if (locationFilter.trim())
       params.set("candidate_location", locationFilter.trim());
@@ -129,18 +190,24 @@ export default function JobClient({ jobId }: { jobId: string }) {
     if (visaFilter.trim()) params.set("visa_status", visaFilter.trim());
     if (workAuthFilter.trim())
       params.set("work_authorization", workAuthFilter.trim());
+    if (statusFilter.trim())
+      params.set("status", statusFilter.trim());
+    params.set("page", String(targetPage));
 
     const res = await fetch(`/api/jobs/${jobId}/resumes?${params.toString()}`);
     const json = await res.json();
     if (!res.ok) throw new Error(json?.error ?? "Failed to load candidates");
     setRows(json.data ?? []);
+    setTotalCount(json.totalCount ?? 0);
+    setTotalPages(json.totalPages ?? 1);
+    setServerAvgScore(json.avgScore ?? null);
   }
 
   async function refreshAll() {
     setLoadingList(true);
     setErr(null);
     try {
-      await Promise.all([loadJob(), refreshResumes()]);
+      await Promise.all([loadJob(), refreshResumes(page)]);
     } catch (e: any) {
       setErr(e.message ?? "Error");
     } finally {
@@ -161,11 +228,24 @@ export default function JobClient({ jobId }: { jobId: string }) {
     if (!isProcessing) return;
 
     const intervalId = setInterval(() => {
-      refreshResumes();
+      refreshResumes(page);
     }, 5000);
 
     return () => clearInterval(intervalId);
-  }, [rows]);
+  }, [rows, page]);
+
+  async function handlePageChange(newPage: number) {
+    if (newPage < 1 || newPage > totalPages) return;
+    setPage(newPage);
+    setLoadingList(true);
+    try {
+      await refreshResumes(newPage);
+    } catch (e: any) {
+      setErr(e.message ?? "Failed to change page");
+    } finally {
+      setLoadingList(false);
+    }
+  }
 
   // Load Google APIs
   useEffect(() => {
@@ -514,7 +594,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 transition-colors duration-300">
       <div className="mx-auto max-w-6xl px-6 py-10">
         {initialLoad ? (
           <div className="flex flex-col items-center justify-center py-32">
@@ -529,28 +609,40 @@ export default function JobClient({ jobId }: { jobId: string }) {
         <div className="flex items-center justify-between">
           <a
             href="/dashboard"
-            className="text-sm text-zinc-300 hover:text-white"
+            className="text-sm text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white transition"
           >
             Back to dashboard
           </a>
-          <div className="text-xs text-zinc-500">Job ID: {jobId}</div>
+          <div className="flex items-center gap-3">
+            <ThemeToggle />
+            <button
+              onClick={() => {
+                setTourStep(0);
+                setShowTour(true);
+              }}
+              className="text-xs font-semibold text-violet-600 dark:text-violet-400 hover:text-violet-850 dark:hover:text-violet-300 transition cursor-pointer"
+            >
+              Tour Guide
+            </button>
+            <div className="text-xs text-zinc-500">Job ID: {jobId}</div>
+          </div>
         </div>
 
         <div className="mt-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <div>
+          <div id="tour-job-header">
             <h1 className="text-2xl font-semibold">{job?.title ?? "Job"}</h1>
             <p className="mt-1 text-sm text-zinc-400">
               {job?.company ?? "-"} - {job?.location ?? "-"}
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900/30 px-4 py-2 text-sm">
-              <span className="text-zinc-400">Candidates:</span>{" "}
+          <div id="tour-job-metrics" className="flex flex-wrap gap-2">
+            <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/30 px-4 py-2 text-sm text-zinc-800 dark:text-zinc-200">
+              <span className="text-zinc-500 dark:text-zinc-400">Candidates:</span>{" "}
               <span className="font-semibold">{total}</span>
             </div>
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900/30 px-4 py-2 text-sm">
-              <span className="text-zinc-400">Avg score:</span>{" "}
+            <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/30 px-4 py-2 text-sm text-zinc-800 dark:text-zinc-200">
+              <span className="text-zinc-500 dark:text-zinc-400">Avg score:</span>{" "}
               <span className="font-semibold">
                 {avgScore == null ? "-" : avgScore.toFixed(1)}
               </span>
@@ -558,21 +650,22 @@ export default function JobClient({ jobId }: { jobId: string }) {
 
             <button
               onClick={() => setDetailsOpen(true)}
-              className="rounded-xl border border-zinc-800 bg-zinc-900/30 px-4 py-2 text-sm font-semibold hover:bg-zinc-900/60"
+              className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/30 px-4 py-2 text-sm font-semibold text-zinc-800 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-900/60 transition cursor-pointer"
             >
               View job details
             </button>
 
             <button
+              id="tour-job-upload"
               onClick={() => setUploadOpen(true)}
-              className="rounded-xl bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-white"
+              className="rounded-xl bg-zinc-900 dark:bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-50 dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-white transition cursor-pointer"
             >
               Upload resumes
             </button>
 
             <button
               onClick={() => setDeleteJobOpen(true)}
-              className="rounded-xl bg-red-900/40 px-4 py-2 text-sm font-semibold text-red-200 hover:bg-red-900/60"
+              className="rounded-xl bg-red-900/20 dark:bg-red-900/40 px-4 py-2 text-sm font-semibold text-red-600 dark:text-red-200 hover:bg-red-900/30 dark:hover:bg-red-900/60 transition cursor-pointer"
             >
               Delete Job
             </button>
@@ -586,24 +679,24 @@ export default function JobClient({ jobId }: { jobId: string }) {
         )}
 
         {/* Filters */}
-        <div className="mt-6 flex flex-wrap gap-3 rounded-xl border border-zinc-800 bg-zinc-900/20 p-4">
+        <div id="tour-job-filters" className="mt-6 flex flex-wrap gap-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/20 p-4 shadow-sm dark:shadow-none">
           <input
             value={locationFilter}
             onChange={(e) => setLocationFilter(e.target.value)}
             placeholder="Filter location..."
-            className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-zinc-600"
+            className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600"
           />
           <input
             value={minExpFilter}
             onChange={(e) => setMinExpFilter(e.target.value)}
             type="number"
             placeholder="Min Exp (years)"
-            className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-zinc-600"
+            className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600"
           />
           <select
             value={visaFilter}
             onChange={(e) => setVisaFilter(e.target.value)}
-            className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-zinc-600"
+            className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600"
           >
             <option value="">Any Visa Status</option>
             <option value="citizen">Citizen</option>
@@ -613,31 +706,34 @@ export default function JobClient({ jobId }: { jobId: string }) {
           <select
             value={workAuthFilter}
             onChange={(e) => setWorkAuthFilter(e.target.value)}
-            className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-zinc-600"
+            className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600"
           >
             <option value="">Any Work Auth</option>
             <option value="authorized">Authorized</option>
             <option value="sponsorship">Sponsorship</option>
           </select>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600"
+          >
+            <option value="">Any Candidate Status</option>
+            <option value="scored">Scored</option>
+            <option value="uploaded">Processing</option>
+            <option value="failed">Failed</option>
+          </select>
           <button
-            onClick={refreshResumes}
-            className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-white"
+            onClick={() => {
+              setPage(1);
+              refreshResumes(1);
+            }}
+            className="rounded-lg bg-zinc-900 dark:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-white px-4 py-2 text-sm font-semibold text-zinc-50 dark:text-zinc-950 transition cursor-pointer"
           >
             Apply Filters
           </button>
-          {(locationFilter || minExpFilter || visaFilter || workAuthFilter) && (
+          {hasActiveFilters && (
             <button
-              onClick={() => {
-                setLocationFilter("");
-                setMinExpFilter("");
-                setVisaFilter("");
-                setWorkAuthFilter("");
-                // need to trigger refresh after state update.
-                // hack: just clear params and call refresh manually or wait for effect?
-                // actually easier to just clear and let user click Apply or auto-refresh
-                // For now, simple clear. User hits Apply again or we add useEffect on filters?
-                // Let's just clear and user clicks Apply to see all.
-              }}
+              onClick={handleClearFilters}
               className="text-sm text-zinc-400 hover:text-white"
             >
               Clear
@@ -646,15 +742,15 @@ export default function JobClient({ jobId }: { jobId: string }) {
         </div>
 
         {/* Candidates table */}
-        <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/20">
-          <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-4">
-            <div className="text-sm font-semibold text-zinc-200">
+        <div id="tour-job-table" className="mt-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/20 shadow-sm dark:shadow-none">
+          <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 px-5 py-4">
+            <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
               Candidates
             </div>
             <button
               onClick={refreshAll}
               disabled={loadingList}
-              className="rounded-xl border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-900/60 disabled:opacity-60"
+              className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900/30 px-3 py-2 text-xs font-semibold text-zinc-800 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-900/60 disabled:opacity-60 cursor-pointer"
             >
               {loadingList ? "Refreshing..." : "Refresh"}
             </button>
@@ -662,240 +758,184 @@ export default function JobClient({ jobId }: { jobId: string }) {
 
           {rows.length === 0 ? (
             <div className="p-8">
-              <div className="rounded-2xl border border-zinc-800 border-dashed p-8 text-center">
-                <div className="text-lg font-semibold">No resumes uploaded</div>
-                <div className="mt-2 text-sm text-zinc-400">
-                  Upload a PDF/DOCX/TXT or ZIP containing multiple resumes.
+              {hasActiveFilters ? (
+                <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 border-dashed p-8 text-center bg-zinc-50/50 dark:bg-zinc-900/10">
+                  <div className="text-3xl mb-3">🔍</div>
+                  <div className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">No candidates available</div>
+                  <div className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+                    No candidates match your current filters. Try adjusting or clearing your search criteria.
+                  </div>
+                  <button
+                    onClick={handleClearFilters}
+                    className="mt-5 rounded-xl bg-zinc-900 dark:bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-50 dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-white transition cursor-pointer"
+                  >
+                    Clear Filters
+                  </button>
                 </div>
-                <button
-                  onClick={() => setUploadOpen(true)}
-                  className="mt-5 rounded-xl bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-white"
-                >
-                  Upload resumes
-                </button>
-              </div>
+              ) : (
+                <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 border-dashed p-8 text-center bg-zinc-50/50 dark:bg-zinc-900/10">
+                  <div className="text-3xl mb-3">📂</div>
+                  <div className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">No resumes uploaded yet</div>
+                  <div className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+                    Upload a PDF, DOCX, TXT, or ZIP file containing multiple resumes to get started.
+                  </div>
+                  <button
+                    onClick={() => setUploadOpen(true)}
+                    className="mt-5 rounded-xl bg-zinc-950 border border-zinc-200 dark:border-zinc-800 dark:bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-300 dark:text-zinc-950 hover:bg-zinc-900 dark:hover:bg-white transition cursor-pointer"
+                  >
+                    Upload resumes
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[900px] text-left text-sm">
-                <thead className="bg-zinc-950/40 text-xs text-zinc-400">
-                  <tr>
-                    <th className="px-5 py-3 font-semibold">Candidate</th>
-                    <th className="px-5 py-3 font-semibold">Details</th>
-                    <th
-                      className="px-5 py-3 font-semibold cursor-pointer hover:text-zinc-300 select-none group"
-                      onClick={() => {
-                        if (sortField === "score") {
-                          if (sortDirection === "asc") setSortDirection("desc");
-                          else setSortField(null);
-                        } else {
-                          setSortField("score");
-                          setSortDirection("desc");
-                        }
-                      }}
-                    >
-                      <div className="flex items-center gap-1">
-                        Score
-                        <span
-                          className={`text-zinc-600 ${sortField === "score" ? "text-blue-400" : "group-hover:text-zinc-400"}`}
-                        >
-                          {sortField === "score"
-                            ? sortDirection === "asc"
-                              ? "↑"
-                              : "↓"
-                            : "⇅"}
-                        </span>
-                      </div>
-                    </th>
-                    <th
-                      className="px-5 py-3 font-semibold cursor-pointer hover:text-zinc-300 select-none group"
-                      onClick={() => {
-                        if (sortField === "status") {
-                          if (sortDirection === "asc") setSortDirection("desc");
-                          else setSortField(null);
-                        } else {
-                          setSortField("status");
-                          setSortDirection("desc");
-                        }
-                      }}
-                    >
-                      <div className="flex items-center gap-1">
-                        Status
-                        <span
-                          className={`text-zinc-600 ${sortField === "status" ? "text-blue-400" : "group-hover:text-zinc-400"}`}
-                        >
-                          {sortField === "status"
-                            ? sortDirection === "asc"
-                              ? "↑"
-                              : "↓"
-                            : "⇅"}
-                        </span>
-                      </div>
-                    </th>
-                    <th className="px-5 py-3 font-semibold">Uploaded</th>
-                    <th className="px-5 py-3 font-semibold">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedRows.map((r) => (
-                    <Fragment key={r.id}>
-                      <tr
-                        key={r.id}
-                        className="border-t border-zinc-800 hover:bg-zinc-900/30 transition-colors"
-                      >
-                        <td className="px-5 py-4">
-                          <div className="font-semibold">
+            <>
+              {/* Sort controls */}
+              <div className="flex items-center gap-3 border-b border-zinc-200 dark:border-zinc-800 px-5 py-3 bg-zinc-50 dark:bg-zinc-950/20 text-xs text-zinc-500 dark:text-zinc-400">
+                <span className="font-semibold uppercase tracking-wide">Sort:</span>
+                <button
+                  onClick={() => {
+                    if (sortField === "score") {
+                      if (sortDirection === "asc") setSortDirection("desc");
+                      else setSortField(null);
+                    } else {
+                      setSortField("score");
+                      setSortDirection("desc");
+                    }
+                  }}
+                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1 font-semibold transition cursor-pointer ${sortField === "score" ? "bg-zinc-200 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100" : "hover:bg-zinc-100 dark:hover:bg-zinc-900/40"}`}
+                >
+                  Score {sortField === "score" ? (sortDirection === "asc" ? "↑" : "↓") : "⇅"}
+                </button>
+                <button
+                  onClick={() => {
+                    if (sortField === "status") {
+                      if (sortDirection === "asc") setSortDirection("desc");
+                      else setSortField(null);
+                    } else {
+                      setSortField("status");
+                      setSortDirection("desc");
+                    }
+                  }}
+                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1 font-semibold transition cursor-pointer ${sortField === "status" ? "bg-zinc-200 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100" : "hover:bg-zinc-100 dark:hover:bg-zinc-900/40"}`}
+                >
+                  Status {sortField === "status" ? (sortDirection === "asc" ? "↑" : "↓") : "⇅"}
+                </button>
+              </div>
+
+              {/* Card list */}
+              <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                {sortedRows.map((r) => (
+                  <Fragment key={r.id}>
+                    <div className="px-5 py-4 hover:bg-zinc-50 dark:hover:bg-zinc-900/20 transition-colors">
+                      {/* Top row: name + score + status */}
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="font-semibold text-zinc-800 dark:text-zinc-200 truncate">
                             {r.full_name ?? "Unknown name"}
                           </div>
-                          <div className="text-xs text-zinc-400">
+                          <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate mt-0.5">
                             {r.original_filename}
                           </div>
-                          <button
-                            onClick={() =>
-                              setExpandedRow(expandedRow === r.id ? null : r.id)
-                            }
-                            disabled={r.status === "uploaded"}
-                            className="mt-2 text-xs font-medium text-blue-400 hover:text-blue-300 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            {expandedRow === r.id
-                              ? "Hide details"
-                              : "Show details"}
-                            <svg
-                              className={`w-3 h-3 transform transition-transform ${
-                                expandedRow === r.id ? "rotate-180" : ""
-                              }`}
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M19 9l-7 7-7-7"
-                              />
-                            </svg>
-                          </button>
-                        </td>
-                        <td className="px-5 py-4">
-                          <div className="text-zinc-200">{r.email ?? "-"}</div>
-                          <div className="text-zinc-400">{r.phone ?? "-"}</div>
-                          <div className="mt-1 flex flex-wrap gap-2 text-xs">
-                            {r.parsed_json?.candidate_location ? (
-                              <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-300">
-                                {r.parsed_json.candidate_location}
-                              </span>
-                            ) : (
-                              <span className="rounded bg-red-900/20 px-1.5 py-0.5 text-red-300/70 border border-red-900/30">
-                                Location missing
-                              </span>
-                            )}
-
-                            {r.parsed_json?.years_experience != null &&
-                              r.parsed_json.years_experience > 0 && (
-                                <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-300">
-                                  {r.parsed_json.years_experience}y exp
-                                </span>
-                              )}
-
-                            {r.parsed_json?.visa_status ? (
-                              <span className="rounded bg-blue-900/40 px-1.5 py-0.5 text-blue-200">
-                                {r.parsed_json.visa_status.replace("_", " ")}
-                              </span>
-                            ) : (
-                              <span className="rounded bg-red-900/20 px-1.5 py-0.5 text-red-300/70 border border-red-900/30">
-                                Visa status missing
-                              </span>
-                            )}
-
-                            {r.parsed_json?.work_authorization ? (
-                              <span className="rounded bg-indigo-900/40 px-1.5 py-0.5 text-indigo-200">
-                                {r.parsed_json.work_authorization}
-                              </span>
-                            ) : (
-                              <span className="rounded bg-red-900/20 px-1.5 py-0.5 text-red-300/70 border border-red-900/30">
-                                Auth missing
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-5 py-4">
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
                           <ScorePill score={r.score} />
-                        </td>
-                        <td className="px-5 py-4">
+                          {/* Status badge */}
                           {r.status === "uploaded" ? (
-                            <span className="inline-flex items-center gap-1 rounded bg-blue-900/30 px-2 py-1 text-[10px] uppercase font-bold tracking-wider text-blue-400">
-                              <svg
-                                className="h-3 w-3 animate-spin"
-                                viewBox="0 0 24 24"
-                              >
-                                <circle
-                                  className="opacity-25"
-                                  cx="12"
-                                  cy="12"
-                                  r="10"
-                                  stroke="currentColor"
-                                  strokeWidth="4"
-                                  fill="none"
-                                ></circle>
-                                <path
-                                  className="opacity-75"
-                                  fill="currentColor"
-                                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                                ></path>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider text-blue-600 dark:text-blue-400">
+                              <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                               </svg>
                               Processing
                             </span>
                           ) : (r.status === "failed" || r.status === "error") ? (
-                            <div className="space-y-1.5">
-                              <span className="inline-flex items-center gap-1.5 rounded-full border border-red-900/50 bg-red-950/40 px-3 py-1 text-xs text-red-400">
-                                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                                </svg>
-                                Failed
-                              </span>
-                              {r.parsed_json?.error_code && (
-                                <div className="text-[10px] text-red-400/70 font-mono">
-                                  {r.parsed_json.error_code}
-                                </div>
-                              )}
-                              {r.parsed_json?.retryable && (
-                                <button
-                                  onClick={() => retryResume(r.id)}
-                                  disabled={retryingIds.has(r.id)}
-                                  className="inline-flex items-center gap-1 rounded bg-amber-900/40 px-2 py-1 text-[10px] font-semibold text-amber-200 hover:bg-amber-900/60 disabled:opacity-50 transition-colors"
-                                >
-                                  <svg className={`h-3 w-3 ${retryingIds.has(r.id) ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                  </svg>
-                                  {retryingIds.has(r.id) ? "Retrying..." : "Retry"}
-                                </button>
-                              )}
-                            </div>
+                            <span className="inline-flex items-center gap-1 rounded-full border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/40 px-2.5 py-1 text-xs font-semibold text-red-600 dark:text-red-400">
+                              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                              </svg>
+                              Failed
+                            </span>
                           ) : (
-                            <span
-                              className={`rounded-full border px-3 py-1 text-xs ${
-                                r.status === "scored"
-                                  ? "border-emerald-900/50 bg-emerald-950/40 text-emerald-400"
-                                  : "border-zinc-800 bg-zinc-950/40 text-zinc-300"
-                              }`}
-                            >
+                            <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                              r.status === "scored"
+                                ? "border-emerald-200 dark:border-emerald-900/50 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400"
+                                : "border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-950/40 text-zinc-600 dark:text-zinc-300"
+                            }`}>
                               {r.status}
                             </span>
                           )}
-                        </td>
-                        <td className="px-5 py-4 text-zinc-400">
-                          {new Date(r.created_at).toLocaleString()}
-                        </td>
-                        <td className="px-5 py-4">
-                          <div className="flex gap-2">
+                        </div>
+                      </div>
+
+                      {/* Middle row: contact + badges */}
+                      <div className="mt-2.5 flex flex-wrap items-center gap-2 text-xs">
+                        {r.email && (
+                          <span className="text-zinc-500 dark:text-zinc-400">{r.email}</span>
+                        )}
+                        {r.phone && (
+                          <span className="text-zinc-400 dark:text-zinc-500">{r.phone}</span>
+                        )}
+                        {r.parsed_json?.candidate_location ? (
+                          <span className="rounded-md bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 px-1.5 py-0.5 text-zinc-700 dark:text-zinc-300">
+                            📍 {r.parsed_json.candidate_location}
+                          </span>
+                        ) : (
+                          <span className="rounded-md bg-red-50 dark:bg-red-900/20 px-1.5 py-0.5 text-red-600 dark:text-red-400/80 border border-red-200 dark:border-red-900/30">
+                            Location missing
+                          </span>
+                        )}
+                        {r.parsed_json?.years_experience != null && r.parsed_json.years_experience > 0 && (
+                          <span className="rounded-md bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 px-1.5 py-0.5 text-zinc-700 dark:text-zinc-300">
+                            {r.parsed_json.years_experience}y exp
+                          </span>
+                        )}
+                        {r.parsed_json?.visa_status ? (
+                          <span className="rounded-md bg-blue-50 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-900/30 px-1.5 py-0.5 text-blue-700 dark:text-blue-200">
+                            {r.parsed_json.visa_status.replace("_", " ")}
+                          </span>
+                        ) : (
+                          <span className="rounded-md bg-red-50 dark:bg-red-900/20 px-1.5 py-0.5 text-red-600 dark:text-red-400/80 border border-red-200 dark:border-red-900/30">
+                            Visa missing
+                          </span>
+                        )}
+                        {r.parsed_json?.work_authorization ? (
+                          <span className="rounded-md bg-indigo-50 dark:bg-indigo-900/40 border border-indigo-200 dark:border-indigo-900/30 px-1.5 py-0.5 text-indigo-700 dark:text-indigo-200">
+                            {r.parsed_json.work_authorization}
+                          </span>
+                        ) : (
+                          <span className="rounded-md bg-red-50 dark:bg-red-900/20 px-1.5 py-0.5 text-red-600 dark:text-red-400/80 border border-red-200 dark:border-red-900/30">
+                            Auth missing
+                          </span>
+                        )}
+                        {r.parsed_json?.error_code && (
+                          <span className="rounded-md bg-red-50 dark:bg-red-900/20 px-1.5 py-0.5 text-red-600 dark:text-red-400 font-mono border border-red-200 dark:border-red-900/30">
+                            {r.parsed_json.error_code}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Bottom row: date + actions */}
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-xs text-zinc-400 dark:text-zinc-500">
+                          Uploaded {new Date(r.created_at).toLocaleString()}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            onClick={() => setExpandedRow(expandedRow === r.id ? null : r.id)}
+                            disabled={r.status === "uploaded"}
+                            className="flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                          >
+                            {expandedRow === r.id ? "Hide details" : "Show details"}
+                            <svg className={`w-3 h-3 transition-transform ${expandedRow === r.id ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </button>
+                          <div className="flex items-center gap-1.5">
                             <button
-                              onClick={() => {
-                                setEditCandidate(r);
-                                setEditOpen(true);
-                              }}
+                              onClick={() => { setEditCandidate(r); setEditOpen(true); }}
                               disabled={r.status === "uploaded"}
-                              className="rounded bg-zinc-800 px-2 py-1 text-xs font-semibold text-zinc-200 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                              className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                             >
                               Edit
                             </button>
@@ -903,14 +943,12 @@ export default function JobClient({ jobId }: { jobId: string }) {
                               href={`/api/resumes/${r.id}/view`}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className={`rounded px-2 py-1 text-xs font-semibold ${
+                              className={`rounded-lg border px-2.5 py-1 text-xs font-semibold ${
                                 r.status === "uploaded"
-                                  ? "bg-zinc-800/50 text-zinc-500 cursor-not-allowed"
-                                  : "bg-blue-900/40 text-blue-200 hover:bg-blue-900/60"
+                                  ? "border-zinc-200 dark:border-zinc-800 bg-zinc-100/50 dark:bg-zinc-800/50 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
+                                  : "border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-900/60"
                               }`}
-                              onClick={(e) => {
-                                if (r.status === "uploaded") e.preventDefault();
-                              }}
+                              onClick={(e) => { if (r.status === "uploaded") e.preventDefault(); }}
                             >
                               View
                             </a>
@@ -918,80 +956,74 @@ export default function JobClient({ jobId }: { jobId: string }) {
                               <button
                                 onClick={() => retryResume(r.id)}
                                 disabled={retryingIds.has(r.id)}
-                                className="rounded bg-amber-900/40 px-2 py-1 text-xs font-semibold text-amber-200 hover:bg-amber-900/60 disabled:opacity-50"
+                                className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/40 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/60 disabled:opacity-50 cursor-pointer"
                               >
-                                {retryingIds.has(r.id) ? "..." : "Retry"}
+                                {retryingIds.has(r.id) ? "Retrying..." : "Retry"}
                               </button>
                             )}
                             <button
-                              onClick={() => {
-                                setDeleteCandidate(r);
-                                setDeleteOpen(true);
-                              }}
+                              onClick={() => { setDeleteCandidate(r); setDeleteOpen(true); }}
                               disabled={r.status === "uploaded"}
-                              className="rounded bg-red-900/40 px-2 py-1 text-xs font-semibold text-red-300 hover:bg-red-900/60 disabled:opacity-30 disabled:cursor-not-allowed"
+                              className="rounded-lg border border-red-200 dark:border-red-800/60 bg-red-50 dark:bg-red-900/40 px-2.5 py-1 text-xs font-semibold text-red-600 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/60 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                             >
                               Delete
                             </button>
                           </div>
-                        </td>
-                      </tr>
-                      {/* Error detail row for failed resumes */}
-                      {(r.status === "failed" || r.status === "error") && r.parsed_json?.error && expandedRow === r.id && (
-                        <tr key={`${r.id}-err`} className="bg-red-950/10">
-                          <td colSpan={6} className="px-5 py-0">
-                            <div className="border-l-2 border-red-900/50 pl-6 py-5">
-                              <div className="rounded-xl border border-red-900/30 bg-red-950/20 p-4">
-                                <div className="flex items-start gap-3">
-                                  <div className="mt-0.5 rounded-lg bg-red-900/30 p-1.5">
-                                    <svg className="h-4 w-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                                    </svg>
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      <h4 className="text-sm font-semibold text-red-300">Parsing Failed</h4>
-                                      {r.parsed_json.error_code && (
-                                        <span className="rounded bg-red-900/40 px-1.5 py-0.5 text-[10px] font-mono text-red-300/80">
-                                          {r.parsed_json.error_code}
-                                        </span>
-                                      )}
-                                    </div>
-                                    <p className="mt-2 text-sm text-zinc-400 leading-relaxed">
-                                      {r.parsed_json.error}
-                                    </p>
-                                    {r.parsed_json.retryable && (
-                                      <button
-                                        onClick={() => retryResume(r.id)}
-                                        disabled={retryingIds.has(r.id)}
-                                        className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-amber-900/40 px-3 py-1.5 text-xs font-semibold text-amber-200 hover:bg-amber-900/60 disabled:opacity-50 transition-colors"
-                                      >
-                                        <svg className={`h-3.5 w-3.5 ${retryingIds.has(r.id) ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                        </svg>
-                                        {retryingIds.has(r.id) ? "Retrying..." : "Retry Parsing"}
-                                      </button>
-                                    )}
-                                    {!r.parsed_json.retryable && (
-                                      <p className="mt-2 text-xs text-zinc-500">
-                                        This error is not retryable. Please check your configuration or re-upload the resume.
-                                      </p>
-                                    )}
-                                  </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Error detail panel */}
+                    {(r.status === "failed" || r.status === "error") && r.parsed_json?.error && expandedRow === r.id && (
+                      <div className="border-t border-red-100 dark:border-red-900/30 bg-red-50/50 dark:bg-red-950/10 px-5 py-4">
+                        <div className="border-l-2 border-red-400 dark:border-red-900/50 pl-4">
+                          <div className="rounded-xl border border-red-200 dark:border-red-900/30 bg-white dark:bg-red-950/20 p-4">
+                            <div className="flex items-start gap-3">
+                              <div className="mt-0.5 rounded-lg bg-red-100 dark:bg-red-900/30 p-1.5">
+                                <svg className="h-4 w-4 text-red-500 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                                </svg>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h4 className="text-sm font-semibold text-red-700 dark:text-red-300">Parsing Failed</h4>
+                                  {r.parsed_json.error_code && (
+                                    <span className="rounded bg-red-100 dark:bg-red-900/40 px-1.5 py-0.5 text-[10px] font-mono text-red-600 dark:text-red-300/80">
+                                      {r.parsed_json.error_code}
+                                    </span>
+                                  )}
                                 </div>
+                                <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed">{r.parsed_json.error}</p>
+                                {r.parsed_json.retryable && (
+                                  <button
+                                    onClick={() => retryResume(r.id)}
+                                    disabled={retryingIds.has(r.id)}
+                                    className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-amber-100 dark:bg-amber-900/40 border border-amber-200 dark:border-amber-800 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-900/60 disabled:opacity-50 transition-colors"
+                                  >
+                                    <svg className={`h-3.5 w-3.5 ${retryingIds.has(r.id) ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                    {retryingIds.has(r.id) ? "Retrying..." : "Retry Parsing"}
+                                  </button>
+                                )}
+                                {!r.parsed_json.retryable && (
+                                  <p className="mt-2 text-xs text-zinc-500">This error is not retryable. Please check your configuration or re-upload the resume.</p>
+                                )}
                               </div>
                             </div>
-                          </td>
-                        </tr>
-                      )}
-                      {expandedRow === r.id && r.status !== "failed" && r.status !== "error" && (
-                        <tr key={`${r.id}-det`} className="bg-zinc-900/10">
-                          <td colSpan={6} className="px-5 py-0">
-                            <div className="border-l border-zinc-800 pl-6 py-6 space-y-6">
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Detail panel for scored candidates */}
+                    {expandedRow === r.id && r.status !== "failed" && r.status !== "error" && (
+                      <div className="border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/10 px-5 py-0">
+                        <div className="border-l border-zinc-200 dark:border-zinc-800 pl-6 py-6 space-y-6">
                               {/* Gemini Scoring Breakdown */}
                               {r.parsed_json?.scoring?.breakdown && (
-                                <div className="mb-6 bg-blue-900/10 rounded-lg p-5 border border-blue-900/20">
-                                  <h4 className="text-sm font-semibold text-blue-400 flex items-center gap-2 mb-3">
+                                <div className="mb-6 bg-blue-50/50 dark:bg-blue-900/10 rounded-lg p-5 border border-blue-200 dark:border-blue-900/20 shadow-sm dark:shadow-none">
+                                  <h4 className="text-sm font-semibold text-blue-700 dark:text-blue-400 flex items-center gap-2 mb-3">
                                     <svg
                                       className="w-4 h-4"
                                       fill="none"
@@ -1010,7 +1042,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
 
                                   {r.parsed_json.scoring.breakdown
                                     .relevance && (
-                                    <p className="text-sm text-zinc-300 mb-4 leading-relaxed">
+                                    <p className="text-sm text-zinc-700 dark:text-zinc-300 mb-4 leading-relaxed">
                                       {
                                         r.parsed_json.scoring.breakdown
                                           .relevance
@@ -1022,10 +1054,10 @@ export default function JobClient({ jobId }: { jobId: string }) {
                                     {r.parsed_json.scoring.breakdown.strengths
                                       ?.length > 0 && (
                                       <div>
-                                        <h5 className="font-medium text-emerald-400 mb-2">
+                                        <h5 className="font-semibold text-emerald-700 dark:text-emerald-400 mb-2">
                                           Strengths
                                         </h5>
-                                        <ul className="list-disc list-inside space-y-1 text-zinc-400 text-xs">
+                                        <ul className="list-disc list-inside space-y-1 text-zinc-650 dark:text-zinc-400 text-xs">
                                           {r.parsed_json.scoring.breakdown.strengths.map(
                                             (s: string, i: number) => (
                                               <li key={i}>{s}</li>
@@ -1038,10 +1070,10 @@ export default function JobClient({ jobId }: { jobId: string }) {
                                     {r.parsed_json.scoring.breakdown.weaknesses
                                       ?.length > 0 && (
                                       <div>
-                                        <h5 className="font-medium text-rose-400 mb-2">
+                                        <h5 className="font-semibold text-rose-700 dark:text-rose-400 mb-2">
                                           Weaknesses / Missing
                                         </h5>
-                                        <ul className="list-disc list-inside space-y-1 text-zinc-400 text-xs">
+                                        <ul className="list-disc list-inside space-y-1 text-zinc-650 dark:text-zinc-450 text-xs">
                                           {r.parsed_json.scoring.breakdown.weaknesses.map(
                                             (w: string, i: number) => (
                                               <li key={i}>{w}</li>
@@ -1057,10 +1089,10 @@ export default function JobClient({ jobId }: { jobId: string }) {
                               {/* Summary */}
                               {r.parsed_json?.summary && (
                                 <div>
-                                  <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+                                  <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
                                     Summary
                                   </h4>
-                                  <p className="text-sm text-zinc-300 leading-relaxed max-w-3xl">
+                                  <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed max-w-3xl">
                                     {r.parsed_json.summary}
                                   </p>
                                 </div>
@@ -1069,7 +1101,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
                               {/* Experience */}
                               {r.parsed_json?.experience?.length > 0 && (
                                 <div>
-                                  <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+                                  <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
                                     Experience
                                   </h4>
                                   <div className="grid gap-4 md:grid-cols-2">
@@ -1077,19 +1109,19 @@ export default function JobClient({ jobId }: { jobId: string }) {
                                       (exp: any, i: number) => (
                                         <div
                                           key={i}
-                                          className="bg-zinc-900/40 rounded-lg p-4 border border-zinc-800/50"
+                                          className="bg-zinc-50/80 dark:bg-zinc-900/40 rounded-lg p-4 border border-zinc-200 dark:border-zinc-800/50 shadow-sm dark:shadow-none"
                                         >
-                                          <div className="font-medium text-zinc-200">
+                                          <div className="font-medium text-zinc-800 dark:text-zinc-200">
                                             {exp.role || "Role"}
                                           </div>
-                                          <div className="text-sm text-blue-400">
+                                          <div className="text-sm text-blue-600 dark:text-blue-400 font-semibold">
                                             {exp.company || "Company"}
                                           </div>
-                                          <div className="text-xs text-zinc-500 mt-1">
+                                          <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
                                             {exp.duration}
                                           </div>
                                           {exp.description && (
-                                            <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
+                                            <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-2 leading-relaxed">
                                               {exp.description}
                                             </p>
                                           )}
@@ -1103,7 +1135,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
                               {/* Projects */}
                               {r.parsed_json?.projects?.length > 0 && (
                                 <div>
-                                  <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+                                  <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
                                     Projects
                                   </h4>
                                   <div className="grid gap-4 md:grid-cols-2">
@@ -1111,9 +1143,9 @@ export default function JobClient({ jobId }: { jobId: string }) {
                                       (proj: any, i: number) => (
                                         <div
                                           key={i}
-                                          className="bg-zinc-900/40 rounded-lg p-4 border border-zinc-800/50"
+                                          className="bg-zinc-50/80 dark:bg-zinc-900/40 rounded-lg p-4 border border-zinc-200 dark:border-zinc-800/50 shadow-sm dark:shadow-none"
                                         >
-                                          <div className="font-medium text-zinc-200">
+                                          <div className="font-medium text-zinc-800 dark:text-zinc-200">
                                             {proj.name || "Project"}
                                           </div>
                                           <div className="flex flex-wrap gap-1 mt-2 mb-2">
@@ -1121,7 +1153,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
                                               (t: string, ti: number) => (
                                                 <span
                                                   key={ti}
-                                                  className="text-[10px] uppercase bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded"
+                                                  className="text-[10px] uppercase bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 px-1.5 py-0.5 rounded font-medium"
                                                 >
                                                   {t}
                                                 </span>
@@ -1129,7 +1161,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
                                             )}
                                           </div>
                                           {proj.description && (
-                                            <p className="text-xs text-zinc-400 leading-relaxed">
+                                            <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
                                               {proj.description}
                                             </p>
                                           )}
@@ -1144,7 +1176,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
                               <div className="grid gap-6 md:grid-cols-2">
                                 {r.parsed_json?.education?.length > 0 && (
                                   <div>
-                                    <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+                                    <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
                                       Education
                                     </h4>
                                     <div className="space-y-2">
@@ -1152,17 +1184,17 @@ export default function JobClient({ jobId }: { jobId: string }) {
                                         (edu: any, i: number) => (
                                           <div
                                             key={i}
-                                            className="bg-zinc-900/40 rounded-lg p-3 border border-zinc-800/50 flex justify-between items-start"
+                                            className="bg-zinc-50/80 dark:bg-zinc-900/40 rounded-lg p-3 border border-zinc-200 dark:border-zinc-800/50 flex justify-between items-start shadow-sm dark:shadow-none"
                                           >
                                             <div>
-                                              <div className="text-sm font-medium text-zinc-200">
+                                              <div className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
                                                 {edu.degree}
                                               </div>
-                                              <div className="text-xs text-zinc-400">
+                                              <div className="text-xs text-zinc-600 dark:text-zinc-400">
                                                 {edu.school}
                                               </div>
                                             </div>
-                                            <div className="text-xs text-zinc-500 whitespace-nowrap">
+                                            <div className="text-xs text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
                                               {edu.year}
                                             </div>
                                           </div>
@@ -1177,7 +1209,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
                                   {r.parsed_json?.certifications?.length >
                                     0 && (
                                     <div className="mb-6">
-                                      <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+                                      <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
                                         Certifications
                                       </h4>
                                       <div className="space-y-2">
@@ -1187,10 +1219,10 @@ export default function JobClient({ jobId }: { jobId: string }) {
                                               key={i}
                                               className="flex justify-between items-center text-sm"
                                             >
-                                              <span className="text-zinc-300">
+                                              <span className="text-zinc-700 dark:text-zinc-300">
                                                 {cert.name}
                                               </span>
-                                              <span className="text-zinc-500 text-xs">
+                                              <span className="text-zinc-500 dark:text-zinc-400 text-xs">
                                                 {cert.issuer}{" "}
                                                 {cert.year
                                                   ? `(${cert.year})`
@@ -1205,8 +1237,8 @@ export default function JobClient({ jobId }: { jobId: string }) {
 
                                   {/* Publications */}
                                   {r.parsed_json?.publications?.length > 0 && (
-                                    <div>
-                                      <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+                                    <div className="mt-6">
+                                      <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
                                         Publications
                                       </h4>
                                       <ul className="space-y-2">
@@ -1217,11 +1249,11 @@ export default function JobClient({ jobId }: { jobId: string }) {
                                                 href={pub.link || "#"}
                                                 target="_blank"
                                                 rel="noreferrer"
-                                                className="text-blue-400 hover:underline"
+                                                className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
                                               >
                                                 {pub.title}
                                               </a>
-                                              <span className="text-zinc-500 text-xs ml-2">
+                                              <span className="text-zinc-500 dark:text-zinc-400 text-xs ml-2">
                                                 {pub.year}
                                               </span>
                                             </li>
@@ -1236,7 +1268,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
                               {/* Skills Tag Cloud */}
                               {r.parsed_json?.skills?.length > 0 && (
                                 <div>
-                                  <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+                                  <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
                                     Skills
                                   </h4>
                                   <div className="flex flex-wrap gap-1">
@@ -1244,26 +1276,56 @@ export default function JobClient({ jobId }: { jobId: string }) {
                                       (skill: string, i: number) => (
                                         <span
                                           key={i}
-                                          className="text-xs bg-zinc-800/60 text-zinc-300 px-2 py-1 rounded-md border border-zinc-700/50"
+                                          className="text-xs bg-zinc-100 dark:bg-zinc-800/60 text-zinc-700 dark:text-zinc-300 px-2 py-1 rounded-md border border-zinc-200 dark:border-zinc-700/50 shadow-sm dark:shadow-none"
                                         >
                                           {skill}
                                         </span>
                                       ),
                                     )}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+                                   </div>
+                                 </div>
+                               )}
+                             </div>
+                           </div>
+                       )}
+                     </Fragment>
+                   ))}
+                 </div>
+            {/* Pagination Toolbar */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between border-t border-zinc-200 dark:border-zinc-800 px-5 py-4 text-sm bg-zinc-50 dark:bg-zinc-950/20">
+                <div className="text-zinc-500 dark:text-zinc-400">
+                  Showing <span className="font-semibold text-zinc-800 dark:text-zinc-200">{from + 1}</span> to{" "}
+                  <span className="font-semibold text-zinc-800 dark:text-zinc-200">
+                    {Math.min(from + rows.length, totalCount)}
+                  </span>{" "}
+                  of <span className="font-semibold text-zinc-800 dark:text-zinc-200">{totalCount}</span> candidates
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handlePageChange(page - 1)}
+                    disabled={page === 1 || loadingList}
+                    className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/40 px-3 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-900/70 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  >
+                    Previous
+                  </button>
+                  <span className="text-zinc-500 dark:text-zinc-400 text-xs px-2">
+                    Page <span className="text-zinc-800 dark:text-zinc-200 font-semibold">{page}</span> of{" "}
+                    <span className="text-zinc-800 dark:text-zinc-200 font-semibold">{totalPages}</span>
+                  </span>
+                  <button
+                    onClick={() => handlePageChange(page + 1)}
+                    disabled={page === totalPages || loadingList}
+                    className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/40 px-3 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-900/70 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
         {/* Google Drive Import Progress Card */}
         {importState.status !== 'idle' && (
@@ -1412,6 +1474,14 @@ export default function JobClient({ jobId }: { jobId: string }) {
           jobId={jobId}
           onDeleted={() => { window.location.href = "/dashboard"; }}
         />
+
+        <JobOnboardingTourModal
+          open={showTour}
+          step={tourStep}
+          onNext={handleNextTourStep}
+          onPrev={handlePrevTourStep}
+          onClose={handleCompleteTour}
+        />
         </>
         )}
       </div>
@@ -1419,16 +1489,303 @@ export default function JobClient({ jobId }: { jobId: string }) {
   );
 }
 
+function JobOnboardingTourModal(props: {
+  open: boolean;
+  step: number;
+  onNext: () => void;
+  onPrev: () => void;
+  onClose: () => void;
+}) {
+  const [coords, setCoords] = useState<{
+    highlight: React.CSSProperties;
+    tooltip: React.CSSProperties;
+    placement: "above" | "below" | "center";
+  }>({
+    highlight: {},
+    tooltip: {},
+    placement: "center",
+  });
+
+  const steps = [
+    {
+      title: "Welcome to your Campaign Workspace! 💼",
+      description: "This page shows all parsed applicants and scoring metrics for this job campaign.",
+      icon: "💼",
+      gradient: "from-violet-600 to-indigo-600",
+      shadow: "shadow-indigo-900/35",
+      badge: "Campaign Header",
+      targetId: "tour-job-header"
+    },
+    {
+      title: "Campaign Metrics 📊",
+      description: "Track your applicant pipeline size and average fit score in real-time.",
+      icon: "📊",
+      gradient: "from-blue-600 to-cyan-600",
+      shadow: "shadow-blue-900/35",
+      badge: "Real-time Stats",
+      targetId: "tour-job-metrics"
+    },
+    {
+      title: "Candidate Search Filters 🔍",
+      description: "Search and filter candidates dynamically by location, experience, visa status, or processing state.",
+      icon: "🔍",
+      gradient: "from-fuchsia-600 to-pink-600",
+      shadow: "shadow-pink-900/35",
+      badge: "Advanced Filters",
+      targetId: "tour-job-filters"
+    },
+    {
+      title: "Candidates List 👥",
+      description: "See all applicants in your pipeline. Click 'Show details' to view parsed work history, projects, education, and detailed AI feedback.",
+      icon: "👥",
+      gradient: "from-emerald-600 to-teal-600",
+      shadow: "shadow-emerald-900/35",
+      badge: "Applicant Pipeline",
+      targetId: "tour-job-table"
+    },
+    {
+      title: "Upload Resumes 📤",
+      description: "Add new applicants to this job by uploading PDF, DOCX, TXT files, or importing from Google Drive.",
+      icon: "📤",
+      gradient: "from-amber-600 to-orange-600",
+      shadow: "shadow-amber-900/35",
+      badge: "Add Candidates",
+      targetId: "tour-job-upload"
+    },
+    {
+      title: "Start Scoring Candidates! 🎉",
+      description: "You're all set. Upload resumes to begin matching and scoring candidates instantly.",
+      icon: "⚡",
+      gradient: "from-violet-600 to-indigo-600",
+      shadow: "shadow-indigo-900/35",
+      badge: "Ready",
+      targetId: null
+    }
+  ];
+
+  const current = steps[props.step];
+
+  useEffect(() => {
+    if (!props.open) return;
+
+    const updatePosition = () => {
+      const stepConfig = steps[props.step];
+      if (!stepConfig) return;
+      const el = stepConfig.targetId ? document.getElementById(stepConfig.targetId) : null;
+
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        const scrollY = window.scrollY;
+        const scrollX = window.scrollX;
+
+        const highlightStyle: React.CSSProperties = {
+          position: "absolute",
+          top: `${rect.top + scrollY - 6}px`,
+          left: `${rect.left + scrollX - 6}px`,
+          width: `${rect.width + 12}px`,
+          height: `${rect.height + 12}px`,
+          pointerEvents: "none",
+          zIndex: 115,
+          transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+        };
+
+        const spaceAbove = rect.top;
+        const placement = spaceAbove > 260 ? "above" : "below";
+
+        const tooltipWidth = 380;
+        const screenWidth = window.innerWidth;
+        
+        let leftCoord = rect.left + rect.width / 2 - tooltipWidth / 2;
+        leftCoord = Math.max(16, Math.min(screenWidth - tooltipWidth - 16, leftCoord));
+
+        let tooltipStyle: React.CSSProperties = {
+          position: "absolute",
+          left: `${leftCoord + scrollX}px`,
+          width: `${tooltipWidth}px`,
+          zIndex: 120,
+          transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+        };
+
+        if (placement === "above") {
+          tooltipStyle.bottom = `${window.innerHeight - (rect.top + scrollY) + 12}px`;
+        } else {
+          tooltipStyle.top = `${rect.bottom + scrollY + 12}px`;
+        }
+
+        el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+        setCoords({
+          highlight: highlightStyle,
+          tooltip: tooltipStyle,
+          placement,
+        });
+      } else {
+        setCoords({
+          highlight: { display: "none" },
+          tooltip: {
+            position: "fixed",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            width: "380px",
+            zIndex: 120,
+            transition: "all 0.3s ease",
+          },
+          placement: "center",
+        });
+      }
+    };
+
+    updatePosition();
+    const timer = setTimeout(updatePosition, 150);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition);
+
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition);
+    };
+  }, [props.step, props.open]);
+
+  if (!props.open || !current) return null;
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-[1px] z-[110]" onClick={props.onClose} />
+
+      <div
+        className="rounded-xl border-2 border-violet-500 ring-4 ring-violet-500/20 shadow-[0_0_25px_rgba(139,92,246,0.4)] bg-violet-500/5 transition-all duration-300 animate-pulse pointer-events-none"
+        style={coords.highlight}
+      />
+
+      <div
+        className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5 shadow-2xl transition-all duration-300 select-none text-zinc-100"
+        style={coords.tooltip}
+      >
+        {coords.placement === "above" && (
+          <div className="absolute left-1/2 -bottom-2 -translate-x-1/2 w-4 h-4 bg-zinc-950 border-r border-b border-zinc-800 rotate-45" />
+        )}
+        {coords.placement === "below" && (
+          <div className="absolute left-1/2 -top-2 -translate-x-1/2 w-4 h-4 bg-zinc-950 border-l border-t border-zinc-800 rotate-45" />
+        )}
+
+        <div className="relative z-10 flex justify-between items-center">
+          <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-500">
+            Campaign Tour
+          </span>
+          <span className="rounded-full bg-zinc-900 px-2.5 py-0.5 text-[10px] font-semibold text-zinc-400 border border-zinc-800/80">
+            {current.badge}
+          </span>
+        </div>
+
+        <div className="relative z-10 mt-4 flex gap-4 items-start">
+          <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr ${current.gradient} text-2xl shadow ${current.shadow}`}>
+            {current.icon}
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-sm font-bold text-white tracking-tight">{current.title}</h3>
+            <p className="text-xs text-zinc-400 leading-relaxed">
+              {current.description}
+            </p>
+          </div>
+        </div>
+
+        <div className="relative z-10 mt-6 flex items-center justify-between border-t border-zinc-900 pt-4">
+          <div className="flex gap-1">
+            {steps.map((_, i) => (
+              <div
+                key={i}
+                className={`h-1 rounded-full transition-all duration-300 ${
+                  i === props.step ? "w-4 bg-zinc-100" : "w-1 bg-zinc-800"
+                }`}
+              />
+            ))}
+          </div>
+
+          <div className="flex gap-2">
+            {props.step > 0 ? (
+              <button
+                onClick={props.onPrev}
+                className="rounded-lg border border-zinc-800 bg-zinc-900/40 hover:bg-zinc-900/80 px-3 py-1.5 text-xs font-semibold text-zinc-200 transition cursor-pointer"
+              >
+                Back
+              </button>
+            ) : (
+              <button
+                onClick={props.onClose}
+                className="text-[11px] text-zinc-500 hover:text-zinc-300 font-medium transition px-2 cursor-pointer"
+              >
+                Skip
+              </button>
+            )}
+            <button
+              onClick={props.onNext}
+              className="rounded-lg bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-955 hover:bg-white transition cursor-pointer"
+            >
+              {props.step === 5 ? "Finish" : "Next"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ThemeToggle() {
+  const [theme, setTheme] = useState<"light" | "dark">("dark");
+
+  useEffect(() => {
+    const activeTheme = (localStorage.getItem("patternix-theme") as "light" | "dark") || "dark";
+    setTheme(activeTheme);
+  }, []);
+
+  const toggleTheme = () => {
+    const nextTheme = theme === "dark" ? "light" : "dark";
+    setTheme(nextTheme);
+    localStorage.setItem("patternix-theme", nextTheme);
+    if (nextTheme === "dark") {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  };
+
+  return (
+    <button
+      onClick={toggleTheme}
+      className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 shadow-md transition-all duration-300 cursor-pointer"
+      aria-label="Toggle Theme"
+    >
+      {theme === "dark" ? (
+        <span className="flex items-center gap-1.5 text-xs font-semibold">
+          <svg className="h-4 w-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m12.728 12.728l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z" />
+          </svg>
+          Light Mode
+        </span>
+      ) : (
+        <span className="flex items-center gap-1.5 text-xs font-semibold">
+          <svg className="h-4 w-4 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+          </svg>
+          Dark Mode
+        </span>
+      )}
+    </button>
+  );
+}
+
 function ScorePill({ score }: { score: number | null }) {
   const text = score == null ? "-" : String(score);
   const tone =
     score == null
-      ? "border-zinc-800 bg-zinc-950/40 text-zinc-200"
+      ? "border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-950/40 text-zinc-600 dark:text-zinc-300"
       : score >= 80
-        ? "border-emerald-900/60 bg-emerald-950/40 text-emerald-200"
+        ? "border-emerald-200 dark:border-emerald-900/50 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-250"
         : score >= 60
-          ? "border-amber-900/60 bg-amber-950/40 text-amber-200"
-          : "border-rose-900/60 bg-rose-950/40 text-rose-200";
+          ? "border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-250"
+          : "border-rose-200 dark:border-rose-900/50 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-250";
 
   return (
     <span
