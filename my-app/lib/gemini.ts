@@ -194,6 +194,7 @@ export async function parseResumeWithGemini(
       "full_name": "string or null",
       "email": "string or null",
       "phone": "string or null",
+      "linkedin": "string (LinkedIn profile URL or username) or null",
       "candidate_location": "string (city, state/country) or null",
       "years_experience": number (integer, total years of relevant experience, 0 if none),
       "visa_status": "string (enum: 'citizen', 'green_card', 'h1b') or null if not explicitly stated",

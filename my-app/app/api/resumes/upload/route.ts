@@ -73,7 +73,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function handleOneUpload(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
   userId: string,
-  jobId: string,
+  jobId: string | null,
   fileName: string,
   mimeType: string | undefined,
   bytes: Buffer,
@@ -83,7 +83,7 @@ export async function handleOneUpload(
     .from("resumes")
     .insert({
       owner_id: userId,
-      job_id: jobId,
+      job_id: jobId || null,
       source: "upload",
       original_filename: fileName,
       mime_type: mimeType ?? null,
@@ -98,7 +98,9 @@ export async function handleOneUpload(
 
   // 2) upload to Storage
   const bucket = "resumes";
-  const path = `${userId}/${jobId}/${id}/${safeName(fileName)}`;
+  const path = jobId
+    ? `${userId}/${jobId}/${id}/${safeName(fileName)}`
+    : `${userId}/candidates/${id}/${safeName(fileName)}`;
 
   // Auto-detect mime-type if missing
   const contentType =
@@ -116,7 +118,7 @@ export async function handleOneUpload(
 // Background processing function (runs after the HTTP response is sent)
 export async function processResumeBackground(
   userId: string,
-  jobId: string,
+  jobId: string | null,
   id: string,
   fileName: string,
   mimeType: string | undefined,
@@ -140,16 +142,18 @@ export async function processResumeBackground(
   try {
     // 3) fetch job context for Gemini
     let jobContext = "Not provided";
-    const { data: jobData } = await supabaseAdmin
-      .from("jobs")
-      .select("title, description")
-      .eq("id", jobId)
-      .single();
+    if (jobId) {
+      const { data: jobData } = await supabaseAdmin
+        .from("jobs")
+        .select("title, description")
+        .eq("id", jobId)
+        .single();
 
-    if (jobData) {
-      jobContext = `Title: ${jobData.title || "Unknown"}\nDescription: ${
-        jobData.description || "Not provided"
-      }`;
+      if (jobData) {
+        jobContext = `Title: ${jobData.title || "Unknown"}\nDescription: ${
+          jobData.description || "Not provided"
+        }`;
+      }
     }
 
     // 4) parse + score via Gemini
@@ -196,9 +200,9 @@ export async function processResumeBackground(
         email: geminiData.email,
         phone: geminiData.phone,
         status: "scored",
-        score: finalScore,
-        score_breakdown: finalBreakdown,
-        scoring_version: "gemini-1.0",
+        score: jobId ? finalScore : null,
+        score_breakdown: jobId ? finalBreakdown : null,
+        scoring_version: jobId ? "gemini-1.0" : null,
         parsed_json: geminiData,
       })
       .eq("id", id);
@@ -219,6 +223,15 @@ export async function processResumeBackground(
         },
       })
       .eq("id", id);
+  } finally {
+    if (jobId) {
+      try {
+        const { checkAndSendJobNotification } = await import("@/lib/mail");
+        await checkAndSendJobNotification(supabaseAdmin, userId, jobId);
+      } catch (mailErr) {
+        console.error("Failed to trigger job completion email notification:", mailErr);
+      }
+    }
   }
 }
 
@@ -233,10 +246,8 @@ export async function POST(req: Request) {
     const file = form.get("file") as File | null;
 
     const jobIdRaw = form.get("jobId");
-    const jobId = typeof jobIdRaw === "string" ? jobIdRaw.trim() : "";
+    const jobId = typeof jobIdRaw === "string" && jobIdRaw.trim() ? jobIdRaw.trim() : null;
 
-    if (!jobId)
-      return NextResponse.json({ error: "Missing jobId" }, { status: 400 });
     if (!file)
       return NextResponse.json({ error: "Missing file" }, { status: 400 });
 

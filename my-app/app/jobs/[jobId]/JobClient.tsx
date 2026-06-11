@@ -25,6 +25,8 @@ type Job = {
 
 export default function JobClient({ jobId }: { jobId: string }) {
   const [rows, setRows] = useState<ResumeRow[]>([]);
+  const [selectedJobResumeIds, setSelectedJobResumeIds] = useState<Set<string>>(new Set());
+  const [deleteMultipleOpen, setDeleteMultipleOpen] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
   const [showTour, setShowTour] = useState(false);
   const [tourStep, setTourStep] = useState(0);
@@ -201,6 +203,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
     setTotalCount(json.totalCount ?? 0);
     setTotalPages(json.totalPages ?? 1);
     setServerAvgScore(json.avgScore ?? null);
+    setSelectedJobResumeIds(new Set());
   }
 
   async function refreshAll() {
@@ -673,7 +676,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
         </div>
 
         {err && (
-          <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/40 px-4 py-3 text-sm">
+          <div className="mt-4 rounded-xl border border-red-200 dark:border-red-800/30 bg-red-50 dark:bg-red-950/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
             {err}
           </div>
         )}
@@ -790,44 +793,118 @@ export default function JobClient({ jobId }: { jobId: string }) {
             </div>
           ) : (
             <>
-              {/* Sort controls */}
-              <div className="flex items-center gap-3 border-b border-zinc-200 dark:border-zinc-800 px-5 py-3 bg-zinc-50 dark:bg-zinc-950/20 text-xs text-zinc-500 dark:text-zinc-400">
-                <span className="font-semibold uppercase tracking-wide">Sort:</span>
-                <button
-                  onClick={() => {
-                    if (sortField === "score") {
-                      if (sortDirection === "asc") setSortDirection("desc");
-                      else setSortField(null);
-                    } else {
-                      setSortField("score");
-                      setSortDirection("desc");
+              {/* Candidates table header / Action bar */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-200 dark:border-zinc-800 px-5 py-3 bg-zinc-50 dark:bg-zinc-950/20 text-xs text-zinc-500 dark:text-zinc-400">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={
+                      rows.length > 0 &&
+                      rows.every((r) => selectedJobResumeIds.has(r.id))
                     }
-                  }}
-                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1 font-semibold transition cursor-pointer ${sortField === "score" ? "bg-zinc-200 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100" : "hover:bg-zinc-100 dark:hover:bg-zinc-900/40"}`}
-                >
-                  Score {sortField === "score" ? (sortDirection === "asc" ? "↑" : "↓") : "⇅"}
-                </button>
-                <button
-                  onClick={() => {
-                    if (sortField === "status") {
-                      if (sortDirection === "asc") setSortDirection("desc");
-                      else setSortField(null);
-                    } else {
-                      setSortField("status");
-                      setSortDirection("desc");
-                    }
-                  }}
-                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1 font-semibold transition cursor-pointer ${sortField === "status" ? "bg-zinc-200 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100" : "hover:bg-zinc-100 dark:hover:bg-zinc-900/40"}`}
-                >
-                  Status {sortField === "status" ? (sortDirection === "asc" ? "↑" : "↓") : "⇅"}
-                </button>
+                    ref={(el) => {
+                      if (el) {
+                        const allSelected =
+                          rows.length > 0 &&
+                          rows.every((r) => selectedJobResumeIds.has(r.id));
+                        const someSelected =
+                          rows.length > 0 &&
+                          rows.some((r) => selectedJobResumeIds.has(r.id)) &&
+                          !allSelected;
+                        el.indeterminate = someSelected;
+                      }
+                    }}
+                    onChange={() => {
+                      const allSelected =
+                        rows.length > 0 &&
+                        rows.every((r) => selectedJobResumeIds.has(r.id));
+                      if (allSelected) {
+                        setSelectedJobResumeIds(new Set());
+                      } else {
+                        setSelectedJobResumeIds(new Set(rows.map((r) => r.id)));
+                      }
+                    }}
+                    className="h-3.5 w-3.5 rounded border-zinc-300 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-violet-600 focus:ring-violet-500 cursor-pointer"
+                  />
+                  {selectedJobResumeIds.size > 0 ? (
+                    <div className="flex items-center gap-2.5">
+                      <span className="font-bold text-zinc-800 dark:text-zinc-200">
+                        {selectedJobResumeIds.size} selected
+                      </span>
+                      <span className="text-zinc-300 dark:text-zinc-700">|</span>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteMultipleOpen(true)}
+                        className="text-red-655 dark:text-red-400 hover:underline cursor-pointer font-semibold"
+                      >
+                        Delete Selected
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <span className="font-semibold uppercase tracking-wide">Sort:</span>
+                      <button
+                        onClick={() => {
+                          if (sortField === "score") {
+                            if (sortDirection === "asc") setSortDirection("desc");
+                            else setSortField(null);
+                          } else {
+                            setSortField("score");
+                            setSortDirection("desc");
+                          }
+                        }}
+                        className={`flex items-center gap-1 rounded-lg px-2.5 py-1 font-semibold transition cursor-pointer ${sortField === "score" ? "bg-zinc-200 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100" : "hover:bg-zinc-100 dark:hover:bg-zinc-900/40"}`}
+                      >
+                        Score {sortField === "score" ? (sortDirection === "asc" ? "↑" : "↓") : "⇅"}
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (sortField === "status") {
+                            if (sortDirection === "asc") setSortDirection("desc");
+                            else setSortField(null);
+                          } else {
+                            setSortField("status");
+                            setSortDirection("desc");
+                          }
+                        }}
+                        className={`flex items-center gap-1 rounded-lg px-2.5 py-1 font-semibold transition cursor-pointer ${sortField === "status" ? "bg-zinc-200 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100" : "hover:bg-zinc-100 dark:hover:bg-zinc-900/40"}`}
+                      >
+                        Status {sortField === "status" ? (sortDirection === "asc" ? "↑" : "↓") : "⇅"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {selectedJobResumeIds.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedJobResumeIds(new Set())}
+                    className="text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition cursor-pointer sm:ml-auto"
+                  >
+                    Clear Selection
+                  </button>
+                )}
               </div>
 
               {/* Card list */}
               <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
                 {sortedRows.map((r) => (
                   <Fragment key={r.id}>
-                    <div className="px-5 py-4 hover:bg-zinc-50 dark:hover:bg-zinc-900/20 transition-colors">
+                    <div className={`px-5 py-4 hover:bg-zinc-50 dark:hover:bg-zinc-900/20 transition-colors flex items-start gap-4 ${selectedJobResumeIds.has(r.id) ? "bg-violet-50/20 dark:bg-violet-950/5" : ""}`}>
+                      <input
+                        type="checkbox"
+                        checked={selectedJobResumeIds.has(r.id)}
+                        onChange={() => {
+                          setSelectedJobResumeIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(r.id)) next.delete(r.id);
+                            else next.add(r.id);
+                            return next;
+                          });
+                        }}
+                        className="mt-1 h-3.5 w-3.5 rounded border-zinc-300 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-violet-600 focus:ring-violet-500 cursor-pointer flex-shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
                       {/* Top row: name + score + status */}
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0">
@@ -972,6 +1049,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
                         </div>
                       </div>
                     </div>
+                  </div>
 
                     {/* Error detail panel */}
                     {(r.status === "failed" || r.status === "error") && r.parsed_json?.error && expandedRow === r.id && (
@@ -1468,6 +1546,25 @@ export default function JobClient({ jobId }: { jobId: string }) {
           }}
         />
 
+        <DeleteMultipleConfirmationModal
+          open={deleteMultipleOpen}
+          onClose={() => setDeleteMultipleOpen(false)}
+          count={selectedJobResumeIds.size}
+          onConfirm={async () => {
+            await Promise.all(
+              Array.from(selectedJobResumeIds).map((id) =>
+                fetch(`/api/resumes/${id}`, {
+                  method: "DELETE",
+                }).then((res) => {
+                  if (!res.ok) throw new Error("Failed to delete candidate");
+                })
+              )
+            );
+            setSelectedJobResumeIds(new Set());
+            await refreshResumes();
+          }}
+        />
+
         <DeleteJobConfirmationModal
           open={deleteJobOpen}
           onClose={() => setDeleteJobOpen(false)}
@@ -1818,17 +1915,17 @@ function UploadModal(props: {
     <div className="fixed inset-0 z-[70] flex items-center justify-center px-6">
       <div className="absolute inset-0 bg-black/70" onClick={props.onClose} />
 
-      <div className="relative w-full max-w-xl rounded-2xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl">
+      <div className="relative w-full max-w-xl rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-6 shadow-2xl text-zinc-900 dark:text-zinc-100">
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-lg font-semibold">Upload resumes</div>
-            <div className="mt-1 text-sm text-zinc-400">
+            <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
               Upload a PDF/DOCX/TXT or ZIP containing multiple resumes.
             </div>
           </div>
           <button
             onClick={props.onClose}
-            className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-sm hover:bg-zinc-900/70 cursor-pointer"
+            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/40 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-150 dark:hover:bg-zinc-900/70 transition-colors cursor-pointer"
           >
             X
           </button>
@@ -1843,19 +1940,19 @@ function UploadModal(props: {
             className="hidden"
           />
 
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/20 p-4">
-            <div className="text-sm font-semibold">File</div>
+          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/20 p-4 shadow-sm dark:shadow-none">
+            <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">File</div>
 
             <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-center">
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="inline-flex items-center justify-center rounded-xl bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-white cursor-pointer"
+                className="inline-flex items-center justify-center rounded-xl bg-zinc-900 dark:bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-50 dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-white transition-colors cursor-pointer"
               >
                 Choose file
               </button>
 
-              <div className="flex-1 rounded-xl border border-zinc-800 bg-zinc-950/50 px-4 py-2 text-sm text-zinc-300">
+              <div className="flex-1 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100/30 dark:bg-zinc-950/50 px-4 py-2 text-sm text-zinc-700 dark:text-zinc-300 truncate">
                 {filename}
               </div>
 
@@ -1863,7 +1960,7 @@ function UploadModal(props: {
                 <button
                   type="button"
                   onClick={() => props.setFile(null)}
-                  className="rounded-xl border border-zinc-800 bg-zinc-900/30 px-3 py-2 text-sm hover:bg-zinc-900/60 cursor-pointer"
+                  className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-150 dark:hover:bg-zinc-900/60 transition-colors cursor-pointer"
                 >
                   Clear
                 </button>
@@ -1874,19 +1971,19 @@ function UploadModal(props: {
           <button
             type="submit"
             disabled={!props.file || props.uploading}
-            className="w-full rounded-xl bg-zinc-100 px-4 py-3 text-sm font-semibold text-zinc-950 hover:bg-white disabled:opacity-60 cursor-pointer"
+            className="w-full rounded-xl bg-zinc-900 dark:bg-zinc-100 px-4 py-3 text-sm font-semibold text-zinc-50 dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-white disabled:opacity-50 transition-colors cursor-pointer"
           >
             {props.uploading ? "Uploading..." : "Upload"}
           </button>
 
           <div className="relative my-4 flex py-1 items-center">
-            <div className="flex-grow border-t border-zinc-800"></div>
-            <span className="flex-shrink mx-4 text-zinc-500 text-xs uppercase tracking-wider font-semibold">Or</span>
-            <div className="flex-grow border-t border-zinc-800"></div>
+            <div className="flex-grow border-t border-zinc-200 dark:border-zinc-800"></div>
+            <span className="flex-shrink mx-4 text-zinc-400 dark:text-zinc-500 text-xs uppercase tracking-wider font-semibold">Or</span>
+            <div className="flex-grow border-t border-zinc-200 dark:border-zinc-800"></div>
           </div>
 
           {props.driveImporting ? (
-            <div className="w-full flex items-center justify-center gap-2.5 rounded-xl border border-zinc-800 bg-zinc-900/30 px-4 py-3 text-sm font-semibold text-zinc-400">
+            <div className="w-full flex items-center justify-center gap-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 px-4 py-3 text-sm font-semibold text-zinc-600 dark:text-zinc-400">
               <svg className="h-4 w-4 animate-spin text-zinc-400" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
@@ -1894,17 +1991,17 @@ function UploadModal(props: {
               Connecting Google Drive...
             </div>
           ) : (!props.gapiLoaded || !props.gisLoaded) ? (
-            <div className="w-full flex items-center justify-center gap-2.5 rounded-xl border border-zinc-800 bg-zinc-900/30 px-4 py-3 text-sm font-semibold text-zinc-500">
+            <div className="w-full flex items-center justify-center gap-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 px-4 py-3 text-sm font-semibold text-zinc-550 dark:text-zinc-500">
               Loading Google integration...
             </div>
           ) : (
             <div className="space-y-2">
-              <div className="text-xs font-semibold text-zinc-400 px-1">Import from Google Drive:</div>
+              <div className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 px-1">Import from Google Drive:</div>
               <div className="grid grid-cols-2 gap-3">
                 <button
                   type="button"
                   onClick={() => props.onGoogleDriveImport('files')}
-                  className="flex items-center justify-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/30 px-3 py-2.5 text-xs font-semibold text-zinc-200 hover:bg-zinc-900/60 transition-colors cursor-pointer"
+                  className="flex items-center justify-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 px-3 py-2.5 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-900/60 transition-colors cursor-pointer"
                 >
                   <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M19.43 12.98L12.01 2.0199C11.83 1.7099 11.49 1.5199 11.13 1.5199C10.77 1.5199 10.43 1.7099 10.25 2.0199L2.83 12.98C2.65 13.29 2.65 13.67 2.83 13.98L6.56 20.48C6.74 20.79 7.07 20.98 7.43 20.98C7.79 20.98 8.12 20.79 8.3 20.48L15.72 9.5199C15.9 9.2099 16.24 9.0199 16.6 9.0199C16.96 9.0199 17.3 9.2099 17.48 9.5199L21.21 16.02C21.39 16.33 21.39 16.71 21.21 17.02L19.43 20.12C19.25 20.43 18.91 20.62 18.55 20.62C18.19 20.62 17.85 20.43 17.67 20.12L13.94 13.62C13.76 13.31 13.76 12.93 13.94 12.62L15.72 9.5199" fill="#FFC107"/>
@@ -1916,7 +2013,7 @@ function UploadModal(props: {
                 <button
                   type="button"
                   onClick={() => props.onGoogleDriveImport('folder')}
-                  className="flex items-center justify-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/30 px-3 py-2.5 text-xs font-semibold text-zinc-200 hover:bg-zinc-900/60 transition-colors cursor-pointer"
+                  className="flex items-center justify-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 px-3 py-2.5 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-900/60 transition-colors cursor-pointer"
                 >
                   <svg className="h-4 w-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
@@ -1949,24 +2046,24 @@ function JobDetailsModal(props: {
     <div className="fixed inset-0 z-[70] flex items-center justify-center px-6">
       <div className="absolute inset-0 bg-black/70" onClick={props.onClose} />
 
-      <div className="relative w-full max-w-2xl rounded-2xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl">
+      <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-6 shadow-2xl text-zinc-900 dark:text-zinc-100">
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-lg font-semibold">Job details</div>
-            <div className="mt-1 text-sm text-zinc-400">
+            <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
               Review the job metadata and description.
             </div>
           </div>
           <button
             onClick={props.onClose}
-            className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-sm hover:bg-zinc-900/70"
+            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/40 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-150 dark:hover:bg-zinc-900/70 transition-colors cursor-pointer"
           >
             X
           </button>
         </div>
 
         {!job ? (
-          <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/30 p-4 text-sm text-zinc-300">
+          <div className="mt-6 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 p-4 text-sm text-zinc-700 dark:text-zinc-300">
             Loading...
           </div>
         ) : (
@@ -1977,11 +2074,11 @@ function JobDetailsModal(props: {
               <Info label="Location" value={job.location ?? "-"} />
             </div>
 
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/20 p-4">
-              <div className="text-xs font-semibold text-zinc-400">
+            <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/20 p-4 shadow-sm dark:shadow-none">
+              <div className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
                 Description
               </div>
-              <div className="mt-2 whitespace-pre-wrap text-sm text-zinc-200">
+              <div className="mt-2 whitespace-pre-wrap text-sm text-zinc-750 dark:text-zinc-300 leading-relaxed">
                 {job.description}
               </div>
             </div>
@@ -1998,9 +2095,9 @@ function JobDetailsModal(props: {
 
 function Info({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/20 p-4">
-      <div className="text-xs font-semibold text-zinc-400">{label}</div>
-      <div className="mt-2 text-sm font-semibold text-zinc-200">{value}</div>
+    <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/20 p-4 shadow-sm dark:shadow-none">
+      <div className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">{label}</div>
+      <div className="mt-2 text-sm font-semibold text-zinc-800 dark:text-zinc-200">{value}</div>
     </div>
   );
 }
@@ -2057,12 +2154,12 @@ function EditCandidateModal({
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center px-6">
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-      <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl">
+      <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-6 shadow-2xl text-zinc-900 dark:text-zinc-100">
         <div className="flex items-start justify-between gap-4">
           <div className="text-lg font-semibold">Edit Candidate</div>
           <button
             onClick={onClose}
-            className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-sm hover:bg-zinc-900/70"
+            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/40 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-150 dark:hover:bg-zinc-900/70 transition-colors cursor-pointer"
           >
             X
           </button>
@@ -2070,58 +2167,58 @@ function EditCandidateModal({
         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="text-xs text-zinc-400">Full Name</label>
+              <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">Full Name</label>
               <input
                 name="full_name"
                 value={formData.full_name || ""}
                 onChange={handleChange}
-                className="w-full mt-1 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm"
+                className="w-full mt-1 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
               />
             </div>
             <div>
-              <label className="text-xs text-zinc-400">Email</label>
+              <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">Email</label>
               <input
                 name="email"
                 value={formData.email || ""}
                 onChange={handleChange}
-                className="w-full mt-1 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm"
+                className="w-full mt-1 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
               />
             </div>
             <div>
-              <label className="text-xs text-zinc-400">Phone</label>
+              <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">Phone</label>
               <input
                 name="phone"
                 value={formData.phone || ""}
                 onChange={handleChange}
-                className="w-full mt-1 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm"
+                className="w-full mt-1 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
               />
             </div>
             <div>
-              <label className="text-xs text-zinc-400">Location</label>
+              <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">Location</label>
               <input
                 name="candidate_location"
                 value={formData.candidate_location || ""}
                 onChange={handleChange}
-                className="w-full mt-1 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm"
+                className="w-full mt-1 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
               />
             </div>
             <div>
-              <label className="text-xs text-zinc-400">Years Experience</label>
+              <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">Years Experience</label>
               <input
                 name="years_experience"
                 type="number"
                 value={formData.years_experience || 0}
                 onChange={handleChange}
-                className="w-full mt-1 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm"
+                className="w-full mt-1 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
               />
             </div>
             <div>
-              <label className="text-xs text-zinc-400">Visa Status</label>
+              <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">Visa Status</label>
               <select
                 name="visa_status"
                 value={formData.visa_status || ""}
                 onChange={handleChange}
-                className="w-full mt-1 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm"
+                className="w-full mt-1 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-850 text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
               >
                 <option value="">Unknown</option>
                 <option value="citizen">Citizen</option>
@@ -2130,12 +2227,12 @@ function EditCandidateModal({
               </select>
             </div>
             <div>
-              <label className="text-xs text-zinc-400">Work Auth</label>
+              <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">Work Auth</label>
               <select
                 name="work_authorization"
                 value={formData.work_authorization || ""}
                 onChange={handleChange}
-                className="w-full mt-1 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm"
+                className="w-full mt-1 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
               >
                 <option value="">Unknown</option>
                 <option value="authorized">Authorized</option>
@@ -2144,19 +2241,19 @@ function EditCandidateModal({
             </div>
           </div>
           <div>
-            <label className="text-xs text-zinc-400">Summary</label>
+            <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">Summary</label>
             <textarea
               name="summary"
               rows={4}
               value={formData.summary || ""}
               onChange={handleChange}
-              className="w-full mt-1 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm"
+              className="w-full mt-1 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
             />
           </div>
           <button
             type="submit"
             disabled={saving}
-            className="w-full rounded-xl bg-zinc-100 px-4 py-3 text-sm font-semibold text-zinc-950 hover:bg-white disabled:opacity-60"
+            className="w-full rounded-xl bg-zinc-900 dark:bg-zinc-100 px-4 py-3 text-sm font-semibold text-zinc-50 dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-white disabled:opacity-60 transition-colors cursor-pointer"
           >
             {saving ? "Saving..." : "Save Changes"}
           </button>
@@ -2197,13 +2294,13 @@ function DeleteConfirmationModal({
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center px-6">
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-      <div className="relative w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl">
-        <div className="text-lg font-semibold text-red-400">
+      <div className="relative w-full max-w-md rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-6 shadow-2xl text-zinc-900 dark:text-zinc-100">
+        <div className="text-lg font-semibold text-red-500 dark:text-red-400">
           Delete Candidate?
         </div>
-        <div className="mt-2 text-sm text-zinc-400">
+        <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
           Are you sure you want to delete{" "}
-          <strong className="text-zinc-200">
+          <strong className="text-zinc-800 dark:text-zinc-200">
             {candidate.full_name || candidate.original_filename}
           </strong>
           ? This action cannot be undone.
@@ -2211,14 +2308,14 @@ function DeleteConfirmationModal({
         <div className="mt-5 flex justify-end gap-3">
           <button
             onClick={onClose}
-            className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-4 py-2 text-sm hover:bg-zinc-900/70"
+            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100/40 dark:bg-zinc-900/40 px-4 py-2 text-sm text-zinc-800 dark:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-900/70 transition-colors cursor-pointer"
           >
             Cancel
           </button>
           <button
             onClick={handleConfirm}
             disabled={deleting}
-            className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-60"
+            className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-60 cursor-pointer"
           >
             {deleting ? "Deleting..." : "Delete"}
           </button>
@@ -2264,16 +2361,74 @@ function DeleteJobConfirmationModal({
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center px-6">
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-      <div className="relative w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl">
-        <div className="text-lg font-semibold text-red-500">Delete Job?</div>
-        <div className="mt-2 text-sm text-zinc-400">
+      <div className="relative w-full max-w-md rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-6 shadow-2xl text-zinc-900 dark:text-zinc-100">
+        <div className="text-lg font-semibold text-red-500 dark:text-red-400">Delete Job?</div>
+        <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
           Are you sure you want to delete this job and{" "}
-          <strong>ALL candidates</strong>? This action cannot be undone.
+          <strong className="text-zinc-800 dark:text-zinc-200">ALL candidates</strong>? This action cannot be undone.
         </div>
         <div className="mt-5 flex justify-end gap-3">
           <button
             onClick={onClose}
-            className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-4 py-2 text-sm hover:bg-zinc-900/70"
+            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100/40 dark:bg-zinc-900/40 px-4 py-2 text-sm text-zinc-800 dark:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-900/70 transition-colors cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleConfirm}
+            disabled={deleting}
+            className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-60 cursor-pointer"
+          >
+            {deleting ? "Deleting..." : "Delete Job"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeleteMultipleConfirmationModal({
+  open,
+  onClose,
+  count,
+  onConfirm,
+}: {
+  open: boolean;
+  onClose: () => void;
+  count: number;
+  onConfirm: () => Promise<void>;
+}) {
+  const [deleting, setDeleting] = useState(false);
+
+  if (!open) return null;
+
+  async function handleConfirm() {
+    setDeleting(true);
+    try {
+      await onConfirm();
+      onClose();
+    } catch (error) {
+      console.error(error);
+      alert("Failed to delete candidates");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center px-6">
+      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
+      <div className="relative w-full max-w-md rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-6 shadow-2xl text-zinc-900 dark:text-zinc-100">
+        <div className="text-lg font-semibold text-red-500 dark:text-red-400">
+          Delete {count} Candidates?
+        </div>
+        <div className="mt-2 text-sm text-zinc-550 dark:text-zinc-400">
+          Are you sure you want to delete the <strong className="text-zinc-800 dark:text-zinc-200">{count}</strong> selected candidates? This action cannot be undone.
+        </div>
+        <div className="mt-5 flex justify-end gap-3">
+          <button
+            onClick={onClose}
+            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100/40 dark:bg-zinc-900/40 px-4 py-2 text-sm text-zinc-800 dark:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-900/70"
           >
             Cancel
           </button>
@@ -2282,7 +2437,7 @@ function DeleteJobConfirmationModal({
             disabled={deleting}
             className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-60"
           >
-            {deleting ? "Deleting..." : "Delete Job"}
+            {deleting ? "Deleting..." : "Delete Candidates"}
           </button>
         </div>
       </div>

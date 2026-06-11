@@ -149,5 +149,14 @@ async function retryInBackground(
         },
       })
       .eq("id", id);
+  } finally {
+    if (jobId) {
+      try {
+        const { checkAndSendJobNotification } = await import("@/lib/mail");
+        await checkAndSendJobNotification(supabaseAdmin, userId, jobId);
+      } catch (mailErr) {
+        console.error("Failed to trigger job completion email notification:", mailErr);
+      }
+    }
   }
 }

@@ -37,41 +37,20 @@ export async function DELETE(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // 1. Fetch all resumes for this job to get their storage paths
-  const { data: resumes, error: fetchErr } = await supabase
+  // 1. Dissociate resumes from the job so they are not deleted by CASCADE and remain in Candidate Directory
+  const { error: updateErr } = await supabase
     .from("resumes")
-    .select("storage_bucket, storage_path")
+    .update({ job_id: null })
     .eq("job_id", jobId);
 
-  if (fetchErr) {
+  if (updateErr) {
     return NextResponse.json(
-      { error: "Failed to fetch resumes" },
+      { error: "Failed to dissociate resumes from job: " + updateErr.message },
       { status: 500 },
     );
   }
 
-  // 2. Delete files from storage
-  if (resumes && resumes.length > 0) {
-    const paths = resumes
-      .map((r) => r.storage_path)
-      .filter((p): p is string => !!p);
-
-    // Deleting in batches if needed, but for now allow all
-    if (paths.length > 0) {
-      // Assume all are in "resumes" bucket for now or check r.storage_bucket
-      const bucket = resumes[0].storage_bucket || "resumes";
-      const { error: storageErr } = await supabase.storage
-        .from(bucket)
-        .remove(paths);
-
-      if (storageErr) {
-        console.error("Failed to delete files", storageErr);
-        // continue to delete rows anyway? Yes, to avoid inconsistency.
-      }
-    }
-  }
-
-  // 3. Delete the job (cascade should handle resumes, but let's be safe/explicit if needed)
+  // 2. Delete the job row
   const { error: delErr } = await supabase
     .from("jobs")
     .delete()

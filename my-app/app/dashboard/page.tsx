@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import CandidateDirectory from "./CandidateDirectory";
 
 type Job = {
   id: string;
@@ -20,11 +21,33 @@ export default function DashboardPage() {
   const supabase = createSupabaseBrowserClient();
 
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [activeTab, setActiveTab] = useState<"jobs" | "profile">("jobs");
+  const [loadingJobs, setLoadingJobs] = useState(true);
+  const [activeTab, setActiveTab] = useState<"jobs" | "candidates" | "profile">("jobs");
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab");
+    if (tab === "candidates" || tab === "profile" || tab === "jobs") {
+      setActiveTab(tab as any);
+    }
+  }, []);
+
+  const handleTabChange = (tab: "jobs" | "candidates" | "profile") => {
+    setActiveTab(tab);
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", tab);
+    window.history.pushState({}, "", url.toString());
+  };
 
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // delete job modal state
+  const [deleteJobId, setDeleteJobId] = useState<string | null>(null);
+  const [deleteJobTitle, setDeleteJobTitle] = useState<string>("");
+  const [deleteJobOpen, setDeleteJobOpen] = useState(false);
+  const [deletingJob, setDeletingJob] = useState(false);
 
   // Onboarding Tour state
   const [showTour, setShowTour] = useState(false);
@@ -161,10 +184,15 @@ export default function DashboardPage() {
     title.trim().length > 0 && description.trim().length > 0 && !creating;
 
   async function loadJobs() {
-    const res = await fetch("/api/jobs");
-    const json = await res.json();
-    if (!res.ok) throw new Error(json?.error ?? "Failed to load jobs");
-    setJobs(json.data ?? []);
+    setLoadingJobs(true);
+    try {
+      const res = await fetch("/api/jobs");
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? "Failed to load jobs");
+      setJobs(json.data ?? []);
+    } finally {
+      setLoadingJobs(false);
+    }
   }
 
   useEffect(() => {
@@ -215,12 +243,34 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleDeleteJob() {
+    if (!deleteJobId) return;
+    setDeletingJob(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/jobs/${deleteJobId}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? "Failed to delete job");
+      setDeleteJobOpen(false);
+      setDeleteJobId(null);
+      setDeleteJobTitle("");
+      await loadJobs();
+    } catch (e: any) {
+      setErr(e.message ?? "Delete failed");
+    } finally {
+      setDeletingJob(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 transition-colors duration-300">
       <NavBar
         active={activeTab}
-        onJobs={() => setActiveTab("jobs")}
-        onProfile={() => setActiveTab("profile")}
+        onJobs={() => handleTabChange("jobs")}
+        onCandidates={() => handleTabChange("candidates")}
+        onProfile={() => handleTabChange("profile")}
         onLogout={logout}
         onCreateJob={() => {
           setOpen(true);
@@ -255,71 +305,119 @@ export default function DashboardPage() {
             </div>
 
             {err && (
-              <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/40 px-4 py-3 text-sm">
+              <div className="mt-4 rounded-xl border border-red-200 dark:border-red-800/30 bg-red-50 dark:bg-red-950/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
                 {err}
               </div>
             )}
 
-            <div className="mt-6 grid gap-4 md:grid-cols-2" id="tour-jobs-list">
-              {jobs.map((j) => (
-                <a
-                  key={j.id}
-                  href={`/jobs/${j.id}`}
-                  className="group rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/30 p-5 hover:bg-zinc-50 dark:hover:bg-zinc-900/45 transition shadow-sm dark:shadow-none"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-lg font-semibold text-zinc-850 dark:text-zinc-200 group-hover:text-zinc-950 dark:group-hover:text-white">
-                        {j.title}
+            {loadingJobs ? (
+              <div className="mt-6 grid gap-4 md:grid-cols-2">
+                {[1, 2, 3, 4].map((n) => (
+                  <div
+                    key={n}
+                    className="rounded-2xl border border-zinc-200 dark:border-zinc-850 bg-white dark:bg-zinc-900/20 p-5 shadow-sm dark:shadow-none relative"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1">
+                        <div className="h-5 w-2/3 rounded-lg bg-zinc-250 dark:bg-zinc-800 animate-pulse" />
+                        <div className="mt-2 h-3.5 w-1/2 rounded bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
                       </div>
-                      <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                        {j.company ?? "-"} - {j.location ?? "-"}
+                      <div className="h-6 w-24 rounded-full bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
+                    </div>
+                    <div className="mt-4 space-y-2">
+                      <div className="h-3.5 w-full rounded bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
+                      <div className="h-3.5 w-5/6 rounded bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
+                    </div>
+                    <div className="mt-5 grid grid-cols-3 gap-3">
+                      <div className="h-12 rounded-xl bg-zinc-150 dark:bg-zinc-900/50 animate-pulse" />
+                      <div className="h-12 rounded-xl bg-zinc-150 dark:bg-zinc-900/50 animate-pulse" />
+                      <div className="h-12 rounded-xl bg-zinc-150 dark:bg-zinc-900/50 animate-pulse" />
+                    </div>
+                    <div className="mt-4 h-3 w-40 rounded bg-zinc-150 dark:bg-zinc-800 animate-pulse" />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-6 grid gap-4 md:grid-cols-2" id="tour-jobs-list">
+                {jobs.map((j) => (
+                  <a
+                    key={j.id}
+                    href={`/jobs/${j.id}`}
+                    className="group rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/30 p-5 hover:bg-zinc-50 dark:hover:bg-zinc-900/45 transition shadow-sm dark:shadow-none relative"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-lg font-semibold text-zinc-850 dark:text-zinc-200 group-hover:text-zinc-950 dark:group-hover:text-white pr-8">
+                          {j.title}
+                        </div>
+                        <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                          {j.company ?? "-"} - {j.location ?? "-"}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-950/40 px-3 py-1 text-xs text-zinc-600 dark:text-zinc-300">
+                          {j.candidate_count} candidates
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setDeleteJobId(j.id);
+                            setDeleteJobTitle(j.title);
+                            setDeleteJobOpen(true);
+                          }}
+                          className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100/40 dark:bg-zinc-900/40 p-2 text-zinc-600 hover:text-red-500 dark:text-zinc-400 dark:hover:text-red-400 hover:bg-red-50/50 dark:hover:bg-red-950/20 transition cursor-pointer"
+                          title="Delete Job"
+                        >
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
                       </div>
                     </div>
-                    <div className="rounded-full border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-950/40 px-3 py-1 text-xs text-zinc-600 dark:text-zinc-300">
-                      {j.candidate_count} candidates
+
+                    {j.description && (
+                      <div className="mt-3 line-clamp-2 text-sm text-zinc-500 dark:text-zinc-400">
+                        {j.description}
+                      </div>
+                    )}
+
+                    <div className="mt-4 grid grid-cols-3 gap-3">
+                      <Stat
+                        label="Candidates"
+                        value={String(j.candidate_count)}
+                      />
+                      <Stat
+                        label="Avg score"
+                        value={j.avg_score == null ? "-" : j.avg_score.toFixed(1)}
+                      />
+                      <Stat
+                        label="Top score"
+                        value={j.top_score == null ? "-" : String(j.top_score)}
+                      />
                     </div>
-                  </div>
 
-                  {j.description && (
-                    <div className="mt-3 line-clamp-2 text-sm text-zinc-500 dark:text-zinc-400">
-                      {j.description}
+                    <div className="mt-4 text-xs text-zinc-500 dark:text-zinc-500">
+                      Created: {new Date(j.created_at).toLocaleString()}
                     </div>
-                  )}
+                  </a>
+                ))}
 
-                  <div className="mt-4 grid grid-cols-3 gap-3">
-                    <Stat
-                      label="Candidates"
-                      value={String(j.candidate_count)}
-                    />
-                    <Stat
-                      label="Avg score"
-                      value={j.avg_score == null ? "-" : j.avg_score.toFixed(1)}
-                    />
-                    <Stat
-                      label="Top score"
-                      value={j.top_score == null ? "-" : String(j.top_score)}
-                    />
+                {jobs.length === 0 && (
+                  <div className="rounded-2xl border border-zinc-800 border-dashed bg-transparent p-8 text-zinc-400">
+                    No jobs yet. Click{" "}
+                    <span className="text-zinc-200">Search Candidate</span> to get
+                    started.
                   </div>
-
-                  <div className="mt-4 text-xs text-zinc-500 dark:text-zinc-500">
-                    Created: {new Date(j.created_at).toLocaleString()}
-                  </div>
-                </a>
-              ))}
-
-              {jobs.length === 0 && (
-                <div className="rounded-2xl border border-zinc-800 border-dashed bg-transparent p-8 text-zinc-400">
-                  No jobs yet. Click{" "}
-                  <span className="text-zinc-200">Search Candidate</span> to get
-                  started.
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
           </>
+        ) : activeTab === "candidates" ? (
+          <CandidateDirectory />
         ) : (
           <ProfileCard onStartTour={() => {
-            setActiveTab("jobs");
+            handleTabChange("jobs");
             setTourStep(0);
             setShowTour(true);
           }} />
@@ -356,13 +454,22 @@ export default function DashboardPage() {
         onPrev={handlePrevTourStep}
         onClose={handleCompleteTour}
       />
+
+      <DeleteJobModal
+        open={deleteJobOpen}
+        onClose={() => setDeleteJobOpen(false)}
+        jobTitle={deleteJobTitle}
+        onConfirm={handleDeleteJob}
+        deleting={deletingJob}
+      />
     </div>
   );
 }
 
 function NavBar(props: {
-  active: "jobs" | "profile";
+  active: "jobs" | "candidates" | "profile";
   onJobs: () => void;
+  onCandidates: () => void;
   onProfile: () => void;
   onLogout: () => void;
   onCreateJob: () => void;
@@ -380,6 +487,11 @@ function NavBar(props: {
               active={props.active === "jobs"}
               onClick={props.onJobs}
               label="Jobs"
+            />
+            <NavItem
+              active={props.active === "candidates"}
+              onClick={props.onCandidates}
+              label="Candidate Directory"
             />
             <NavItem
               active={props.active === "profile"}
@@ -415,6 +527,11 @@ function NavBar(props: {
           active={props.active === "jobs"}
           onClick={props.onJobs}
           label="Jobs"
+        />
+        <NavItem
+          active={props.active === "candidates"}
+          onClick={props.onCandidates}
+          label="Candidate Directory"
         />
         <NavItem
           active={props.active === "profile"}
@@ -455,6 +572,49 @@ function Stat({ label, value }: { label: string; value: string }) {
     <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100/50 dark:bg-zinc-950/40 p-3">
       <div className="text-xs text-zinc-500 dark:text-zinc-400">{label}</div>
       <div className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">{value}</div>
+    </div>
+  );
+}
+
+function DeleteJobModal({
+  open,
+  onClose,
+  jobTitle,
+  onConfirm,
+  deleting,
+}: {
+  open: boolean;
+  onClose: () => void;
+  jobTitle: string;
+  onConfirm: () => void;
+  deleting: boolean;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center px-6">
+      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
+      <div className="relative w-full max-w-md rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-6 shadow-2xl text-zinc-900 dark:text-zinc-100">
+        <div className="text-lg font-semibold text-red-500 dark:text-red-400">Delete Job?</div>
+        <div className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+          Are you sure you want to delete <strong className="text-zinc-800 dark:text-zinc-200">{jobTitle}</strong>? Candidates from this job will remain available in the Candidate Directory.
+        </div>
+        <div className="mt-5 flex justify-end gap-3">
+          <button
+            onClick={onClose}
+            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100/40 dark:bg-zinc-900/40 px-4 py-2 text-sm text-zinc-800 dark:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-zinc-900/70"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={deleting}
+            className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-60"
+          >
+            {deleting ? "Deleting..." : "Delete Job"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -545,8 +705,14 @@ function ProfileCard(props: { onStartTour: () => void }) {
     email: string;
     jobCount: number;
     resumeCount: number;
+    totalResumes: number;
+    directoryOnlyCount: number;
+    uniqueCandidatesCount: number;
     plan: string;
     usageLimit: number;
+    fullName?: string | null;
+    phone?: string | null;
+    avatarUrl?: string | null;
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -557,7 +723,13 @@ function ProfileCard(props: { onStartTour: () => void }) {
   // Edit profile state
   const [editOpen, setEditOpen] = useState(false);
   const [displayName, setDisplayName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState("");
+
   const [editDraft, setEditDraft] = useState("");
+  const [phoneDraft, setPhoneDraft] = useState("");
+  const [avatarUrlDraft, setAvatarUrlDraft] = useState("");
+  const [saving, setSaving] = useState(false);
 
   // Settings states
   const [emailNotify, setEmailNotify] = useState(true);
@@ -570,6 +742,12 @@ function ProfileCard(props: { onStartTour: () => void }) {
         const json = await res.json();
         if (!res.ok) throw new Error(json?.error ?? "Failed to load profile details");
         setProfile(json);
+        if (json.plan) {
+          setActivePlan(json.plan.toLowerCase() === "pro" ? "pro" : "free");
+        }
+        setDisplayName(json.fullName || "");
+        setPhone(json.phone || "");
+        setAvatarUrl(json.avatarUrl || "");
       } catch (e: any) {
         setErr(e.message ?? "Something went wrong");
       } finally {
@@ -579,13 +757,59 @@ function ProfileCard(props: { onStartTour: () => void }) {
     fetchProfile();
   }, []);
 
-  const handleUpgrade = () => {
+  const handleUpgrade = async () => {
     setIsUpgrading(true);
-    setTimeout(() => {
-      setIsUpgrading(false);
+    setErr(null);
+    try {
+      const res = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan: "pro" }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? "Failed to upgrade plan");
+
       setUpgradeSuccess(true);
       setActivePlan("pro");
-    }, 1200);
+      if (profile) {
+        setProfile({
+          ...profile,
+          plan: "pro",
+          usageLimit: json.usageLimit ?? 5000,
+        });
+      }
+    } catch (e: any) {
+      setErr(e.message ?? "Upgrade failed");
+    } finally {
+      setIsUpgrading(false);
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    setSaving(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fullName: editDraft.trim(),
+          phone: phoneDraft.trim(),
+          avatarUrl: avatarUrlDraft.trim(),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? "Failed to update profile");
+
+      setDisplayName(editDraft.trim());
+      setPhone(phoneDraft.trim());
+      setAvatarUrl(avatarUrlDraft.trim());
+      setEditOpen(false);
+    } catch (e: any) {
+      setErr(e.message ?? "Failed to save profile");
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (loading) {
@@ -609,8 +833,10 @@ function ProfileCard(props: { onStartTour: () => void }) {
     );
   }
 
-  const initials = profile.email ? profile.email.substring(0, 2).toUpperCase() : "PX";
-  const usedPercentage = Math.min(100, (profile.resumeCount / profile.usageLimit) * 100);
+  const initials = displayName 
+    ? displayName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
+    : (profile.email ? profile.email.substring(0, 2).toUpperCase() : "PX");
+  const usedPercentage = Math.min(100, (profile.totalResumes / profile.usageLimit) * 100);
 
   return (
     <div className="space-y-6">
@@ -620,8 +846,12 @@ function ProfileCard(props: { onStartTour: () => void }) {
         
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-tr from-violet-600 to-indigo-600 text-xl font-bold text-white shadow-lg shadow-indigo-900/20">
-              {initials}
+            <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl overflow-hidden bg-gradient-to-tr from-violet-600 to-indigo-600 text-xl font-bold text-white shadow-lg shadow-indigo-900/20 border border-zinc-200/20 dark:border-zinc-800/20">
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
+              ) : (
+                <span>{initials}</span>
+              )}
             </div>
             <div>
               {displayName ? (
@@ -630,9 +860,12 @@ function ProfileCard(props: { onStartTour: () => void }) {
                 <h2 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-white">{profile.email}</h2>
               )}
               <div className="mt-1 flex flex-wrap gap-2 text-xs">
-                {displayName && (
+                <span className="rounded bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-zinc-500 dark:text-zinc-400 font-medium">
+                  {profile.email}
+                </span>
+                {phone && (
                   <span className="rounded bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-zinc-500 dark:text-zinc-400 font-medium">
-                    {profile.email}
+                    {phone}
                   </span>
                 )}
                 <span className="rounded bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-zinc-500 dark:text-zinc-400 font-medium">
@@ -650,7 +883,12 @@ function ProfileCard(props: { onStartTour: () => void }) {
           </div>
 
           <button
-            onClick={() => { setEditDraft(displayName); setEditOpen(true); }}
+            onClick={() => {
+              setEditDraft(displayName);
+              setPhoneDraft(phone);
+              setAvatarUrlDraft(avatarUrl);
+              setEditOpen(true);
+            }}
             className="self-start sm:self-auto flex items-center gap-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800/60 px-3 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700/60 transition cursor-pointer"
           >
             <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -669,7 +907,7 @@ function ProfileCard(props: { onStartTour: () => void }) {
             <div className="flex items-center justify-between mb-5">
               <div>
                 <div className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Edit Profile</div>
-                <div className="mt-0.5 text-xs text-zinc-500">Update your display name</div>
+                <div className="mt-0.5 text-xs text-zinc-500">Update your details and avatar</div>
               </div>
               <button
                 onClick={() => setEditOpen(false)}
@@ -679,7 +917,7 @@ function ProfileCard(props: { onStartTour: () => void }) {
               </button>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-1.5 uppercase tracking-wide">Display Name</label>
                 <input
@@ -690,6 +928,50 @@ function ProfileCard(props: { onStartTour: () => void }) {
                   className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/50 px-4 py-2.5 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-violet-400 dark:focus:border-violet-600 transition"
                 />
               </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-1.5 uppercase tracking-wide">Phone Number</label>
+                <input
+                  value={phoneDraft}
+                  onChange={(e) => setPhoneDraft(e.target.value)}
+                  placeholder="e.g. +1 (555) 000-0000"
+                  className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/50 px-4 py-2.5 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-violet-400 dark:focus:border-violet-600 transition"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-1.5 uppercase tracking-wide">Avatar Preset Choice</label>
+                <div className="flex gap-2.5 mb-2 overflow-x-auto py-1">
+                  {[
+                    `https://api.dicebear.com/7.x/bottts/svg?seed=${profile.email.split('@')[0]}`,
+                    `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile.email.split('@')[0]}`,
+                    `https://api.dicebear.com/7.x/identicon/svg?seed=${profile.email.split('@')[0]}`,
+                    `https://api.dicebear.com/7.x/adventurer/svg?seed=${profile.email.split('@')[0]}`,
+                    `https://api.dicebear.com/7.x/initials/svg?seed=${editDraft || 'PX'}`
+                  ].map((presetUrl, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setAvatarUrlDraft(presetUrl)}
+                      className={`h-9 w-9 rounded-xl overflow-hidden border-2 transition-all hover:scale-105 cursor-pointer ${
+                        avatarUrlDraft === presetUrl ? 'border-violet-500 scale-105 shadow-md' : 'border-zinc-250 dark:border-zinc-800'
+                      }`}
+                    >
+                      <img src={presetUrl} alt="Preset" className="h-full w-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-1.5 uppercase tracking-wide">Custom Image URL</label>
+                <input
+                  value={avatarUrlDraft}
+                  onChange={(e) => setAvatarUrlDraft(e.target.value)}
+                  placeholder="https://example.com/avatar.png"
+                  className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/50 px-4 py-2.5 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-violet-400 dark:focus:border-violet-600 transition"
+                />
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-1.5 uppercase tracking-wide">Email</label>
                 <input
@@ -703,16 +985,18 @@ function ProfileCard(props: { onStartTour: () => void }) {
 
             <div className="mt-5 flex gap-2">
               <button
+                disabled={saving}
                 onClick={() => setEditOpen(false)}
                 className="flex-1 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900/40 py-2.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition cursor-pointer"
               >
                 Cancel
               </button>
               <button
-                onClick={() => { setDisplayName(editDraft.trim()); setEditOpen(false); }}
-                className="flex-1 rounded-xl bg-zinc-900 dark:bg-zinc-100 py-2.5 text-xs font-semibold text-zinc-50 dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-white transition cursor-pointer"
+                disabled={saving}
+                onClick={handleSaveProfile}
+                className="flex-1 rounded-xl bg-zinc-900 dark:bg-zinc-100 py-2.5 text-xs font-semibold text-zinc-50 dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-white disabled:opacity-50 transition cursor-pointer"
               >
-                Save Changes
+                {saving ? "Saving..." : "Save Changes"}
               </button>
             </div>
           </div>
@@ -720,29 +1004,40 @@ function ProfileCard(props: { onStartTour: () => void }) {
       )}
 
       {/* Statistics and Usage Grid */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/20 p-5 shadow-sm dark:shadow-none">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/20 p-5 shadow-sm dark:shadow-none transition-all hover:scale-[1.01]">
           <div className="text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Active Jobs</div>
           <div className="mt-2 text-3xl font-bold text-zinc-900 dark:text-white">{profile.jobCount}</div>
-          <div className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">Campaigns created</div>
+          <div className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">Active campaigns</div>
         </div>
         
-        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/20 p-5 shadow-sm dark:shadow-none">
+        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/20 p-5 shadow-sm dark:shadow-none transition-all hover:scale-[1.01]">
           <div className="text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Resumes Processed</div>
           <div className="mt-2 text-3xl font-bold text-zinc-900 dark:text-white">
-            {activePlan === "pro" ? profile.resumeCount : `${profile.resumeCount} / ${profile.usageLimit}`}
+            {activePlan === "pro" ? profile.totalResumes : `${profile.totalResumes} / ${profile.usageLimit}`}
           </div>
           <div className="mt-1.5 w-full bg-zinc-200 dark:bg-zinc-950/60 rounded-full h-1.5 overflow-hidden">
             <div 
               className={`h-full rounded-full transition-all duration-500 ${
-                activePlan === "pro" ? "bg-gradient-to-r from-violet-50 to-indigo-50 w-full" : "bg-zinc-450 dark:bg-zinc-300"
+                activePlan === "pro" ? "bg-gradient-to-r from-violet-50 to-indigo-50 w-full" : "bg-zinc-400 dark:bg-zinc-300"
               }`}
               style={{ width: activePlan === "pro" ? "100%" : `${usedPercentage}%` }}
             />
           </div>
+          <div className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500">Total uploads across workspace</div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/20 p-5 shadow-sm dark:shadow-none">
+        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/20 p-5 shadow-sm dark:shadow-none transition-all hover:scale-[1.01]">
+          <div className="text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Candidate Directory</div>
+          <div className="mt-2 text-3xl font-bold text-zinc-900 dark:text-white">
+            {profile.uniqueCandidatesCount}
+          </div>
+          <div className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
+            {profile.directoryOnlyCount} directory-only uploads
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/20 p-5 shadow-sm dark:shadow-none transition-all hover:scale-[1.01]">
           <div className="text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Current Plan</div>
           <div className="mt-2 text-3xl font-bold text-zinc-900 dark:bg-gradient-to-r dark:from-white dark:to-zinc-400 dark:bg-clip-text dark:text-transparent">
             {activePlan === "pro" ? "Pro Plan" : "Free Tier"}

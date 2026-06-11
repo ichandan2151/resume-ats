@@ -13,12 +13,12 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { fileId, accessToken, fileName, mimeType, jobId, staggerIndex } = body;
+    const { fileId, accessToken, fileName, mimeType, jobId: jobIdRaw, staggerIndex } = body;
+    const jobId = typeof jobIdRaw === "string" && jobIdRaw.trim() ? jobIdRaw.trim() : null;
 
     if (!fileId) return NextResponse.json({ error: "Missing fileId" }, { status: 400 });
     if (!accessToken) return NextResponse.json({ error: "Missing accessToken" }, { status: 400 });
     if (!fileName) return NextResponse.json({ error: "Missing fileName" }, { status: 400 });
-    if (!jobId) return NextResponse.json({ error: "Missing jobId" }, { status: 400 });
 
     // 1. Fetch the file bytes from Google Drive API using user's access token
     const driveRes = await fetch(
