@@ -5,9 +5,9 @@ export const runtime = "nodejs";
 
 export async function GET(
   _req: Request,
-  { params }: { params: Promise<{ jobId: string }> },
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const { jobId } = await params;
+  const { id } = await params;
   const url = new URL(_req.url);
   const location = url.searchParams.get("candidate_location")?.trim();
   const minExp = parseInt(url.searchParams.get("years_experience") || "0", 10);
@@ -28,7 +28,7 @@ export async function GET(
   let statsQuery = supabase
     .from("resumes")
     .select("score")
-    .eq("job_id", jobId);
+    .eq("job_id", id);
 
   if (location) {
     statsQuery = statsQuery.ilike("parsed_json->>candidate_location", `%${location}%`);
@@ -69,8 +69,8 @@ export async function GET(
     .select(
       "id, original_filename, full_name, email, phone, score, status, created_at, parsed_json"
     )
-    .eq("job_id", jobId)
-    .order("created_at", { ascending: false }) // Sort by newest candidates first
+    .eq("job_id", id)
+    .order("created_at", { ascending: false })
     .range(from, to);
 
   if (location) {

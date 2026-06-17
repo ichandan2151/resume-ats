@@ -40,12 +40,13 @@ export default function CandidateDirectory() {
   // UI state
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [deleteCandidate, setDeleteCandidate] = useState<CandidateRow | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [pollingIds, setPollingIds] = useState<Set<string>>(new Set());
+  const [retryingIds, setRetryingIds] = useState<Set<string>>(new Set());
 
   // Selection handlers
   const handleSelectCandidate = (id: string) => {
@@ -251,22 +252,29 @@ export default function CandidateDirectory() {
   // Upload handler
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
-    if (!file) return;
+    if (files.length === 0) return;
 
     setUploading(true);
     setErr(null);
+    const errors: string[] = [];
     try {
-      const fd = new FormData();
-      fd.append("file", file);
+      for (const file of files) {
+        const fd = new FormData();
+        fd.append("file", file);
 
-      const res = await fetch("/api/resumes/upload", {
-        method: "POST",
-        body: fd,
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? "Upload failed");
+        const res = await fetch("/api/resumes/upload", {
+          method: "POST",
+          body: fd,
+        });
+        const json = await res.json();
+        if (!res.ok) errors.push(`${file.name}: ${json?.error ?? "Upload failed"}`);
+      }
 
-      setFile(null);
+      if (errors.length > 0) {
+        setErr(`Failed to upload ${errors.length} file(s):\n${errors.join("\n")}`);
+      }
+
+      setFiles([]);
       setUploadOpen(false);
       await fetchCandidates(1);
     } catch (e: any) {
@@ -556,6 +564,34 @@ export default function CandidateDirectory() {
     }
   }
 
+  async function retryResume(resumeId: string) {
+    setRetryingIds((prev) => new Set(prev).add(resumeId));
+    try {
+      const res = await fetch(`/api/resumes/${resumeId}/retry`, {
+        method: "POST",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? "Retry failed");
+
+      setCandidates((prev) =>
+        prev.map((c) =>
+          c.id === resumeId
+            ? { ...c, status: "uploaded", parsed_json: null }
+            : c
+        )
+      );
+      setPollingIds((prev) => new Set(prev).add(resumeId));
+    } catch (e: any) {
+      setErr(e.message ?? "Retry failed");
+    } finally {
+      setRetryingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(resumeId);
+        return next;
+      });
+    }
+  }
+
   // Client side search matching name/email/skills
   const filteredCandidates = candidates.filter((c) => {
     if (!searchQuery.trim()) return true;
@@ -578,7 +614,7 @@ export default function CandidateDirectory() {
     <div className="mx-auto max-w-6xl px-6 py-10">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Candidate Directory</h1>
+          <h1 className="text-2xl font-semibold">Candidate Directory ({totalCount})</h1>
           <p className="mt-1 text-sm text-zinc-400">
             A master database of candidates. Upload resumes and filter profiles dynamically.
           </p>
@@ -725,7 +761,7 @@ export default function CandidateDirectory() {
 
       <div className="mt-4 flex items-center justify-between text-xs text-zinc-500">
         <div>
-          Showing {filteredCandidates.length} candidate{filteredCandidates.length === 1 ? "" : "s"}
+          Showing {filteredCandidates.length} of {totalCount} candidate{totalCount === 1 ? "" : "s"}
           {hasActiveFilters && " (filtered)"}
         </div>
         {hasActiveFilters && (
@@ -846,9 +882,18 @@ export default function CandidateDirectory() {
                             Parsing
                           </span>
                         ) : (c.status === "failed" || c.status === "error") ? (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/40 px-2.5 py-1 text-xs font-semibold text-red-600 dark:text-red-400">
-                            Failed
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex items-center gap-1 rounded-full border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/40 px-2.5 py-1 text-xs font-semibold text-red-600 dark:text-red-400">
+                              Failed
+                            </span>
+                            <button
+                              onClick={() => retryResume(c.id)}
+                              disabled={retryingIds.has(c.id)}
+                              className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/40 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/60 disabled:opacity-50 cursor-pointer"
+                            >
+                              {retryingIds.has(c.id) ? "Retrying..." : "Retry"}
+                            </button>
+                          </div>
                         ) : (
                           <span className="inline-flex items-center rounded-full border border-emerald-200 dark:border-emerald-900/40 bg-emerald-50 dark:bg-emerald-950/20 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
                             Ready
@@ -933,7 +978,7 @@ export default function CandidateDirectory() {
                 </div>
 
                 {/* Details Accordion Panel */}
-                {expandedRow === c.id && c.parsed_json && (
+                {expandedRow === c.id && c.status !== "failed" && c.status !== "error" && c.parsed_json && (
                   <div className="border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/10 px-6 py-6 space-y-6">
                     {c.parsed_json.summary && (
                       <div>
@@ -1002,6 +1047,43 @@ export default function CandidateDirectory() {
                     )}
                   </div>
                 )}
+
+                {/* Error detail panel */}
+                {expandedRow === c.id && (c.status === "failed" || c.status === "error") && c.parsed_json?.error && (
+                  <div className="border-t border-zinc-200 dark:border-zinc-800 bg-red-50/20 dark:bg-red-950/5 px-6 py-6">
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 text-red-500">
+                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                        </svg>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-sm font-semibold text-red-700 dark:text-red-300">Parsing Failed</h4>
+                          {c.parsed_json.error_code && (
+                            <span className="rounded bg-red-100 dark:bg-red-900/40 px-1.5 py-0.5 text-[10px] font-mono text-red-600 dark:text-red-300/80">
+                              {c.parsed_json.error_code}
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-2 text-sm text-zinc-650 dark:text-zinc-400 leading-relaxed">{c.parsed_json.error}</p>
+                        <button
+                          onClick={() => retryResume(c.id)}
+                          disabled={retryingIds.has(c.id)}
+                          className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-amber-100 dark:bg-amber-900/40 border border-amber-200 dark:border-amber-800 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-900/60 disabled:opacity-50 transition-colors"
+                        >
+                          <svg className={`h-3.5 w-3.5 ${retryingIds.has(c.id) ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          {retryingIds.has(c.id) ? "Retrying..." : "Retry Parsing"}
+                        </button>
+                        {!c.parsed_json.retryable && (
+                          <p className="mt-2 text-xs text-zinc-500">Note: If you have corrected the configuration/API key error, click Retry Parsing above to attempt parsing again.</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </Fragment>
             ))}
           </div>
@@ -1064,7 +1146,8 @@ export default function CandidateDirectory() {
                 ref={fileInputRef}
                 type="file"
                 accept=".pdf,.docx,.txt,.zip,application/pdf,application/zip"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                multiple
+                onChange={(e) => setFiles(e.target.files ? Array.from(e.target.files) : [])}
                 className="hidden"
               />
 
@@ -1076,15 +1159,15 @@ export default function CandidateDirectory() {
                     onClick={() => fileInputRef.current?.click()}
                     className="inline-flex items-center justify-center rounded-xl bg-zinc-900 dark:bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-50 dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-white cursor-pointer"
                   >
-                    Select File
+                    Select Files
                   </button>
                   <div className="flex-1 rounded-xl border border-zinc-205 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/50 px-4 py-2 text-sm text-zinc-400 truncate">
-                    {file ? file.name : "No file selected"}
+                    {files.length > 1 ? `${files.length} files selected` : files.length === 1 ? files[0].name : "No files selected"}
                   </div>
-                  {file && (
+                  {files.length > 0 && (
                     <button
                       type="button"
-                      onClick={() => setFile(null)}
+                      onClick={() => setFiles([])}
                       className="rounded-xl border border-zinc-200 dark:border-zinc-800 px-3 py-2 text-sm hover:bg-zinc-200 cursor-pointer"
                     >
                       Clear
@@ -1140,10 +1223,10 @@ export default function CandidateDirectory() {
                 </button>
                 <button
                   type="submit"
-                  disabled={!file || uploading}
+                  disabled={files.length === 0 || uploading}
                   className="rounded-xl bg-zinc-900 dark:bg-zinc-100 px-4 py-2 text-xs font-semibold text-zinc-50 dark:text-zinc-950 disabled:opacity-40 cursor-pointer"
                 >
-                  {uploading ? "Uploading..." : "Upload File"}
+                  {uploading ? "Uploading..." : files.length > 1 ? `Upload ${files.length} Files` : "Upload File"}
                 </button>
               </div>
             </form>

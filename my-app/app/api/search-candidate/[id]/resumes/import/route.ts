@@ -4,10 +4,10 @@ import { parseResumeWithGemini } from "@/lib/gemini";
 
 export const runtime = "nodejs";
 
-// Background processing for scoring the imported candidate against the job description
-async function analyzeResumeBackground(
+// Background processing for scoring the imported candidate against the search campaign description
+export async function analyzeResumeBackground(
   userId: string,
-  jobId: string,
+  searchId: string,
   id: string,
   extractedText: string,
   fileName: string,
@@ -23,22 +23,22 @@ async function analyzeResumeBackground(
   );
 
   try {
-    // 1) Fetch job details for Gemini context
-    let jobContext = "Not provided";
-    const { data: jobData } = await supabaseAdmin
+    // 1) Fetch search details for Gemini context (using jobs table)
+    let searchContext = "Not provided";
+    const { data: searchData } = await supabaseAdmin
       .from("jobs")
       .select("title, description")
-      .eq("id", jobId)
+      .eq("id", searchId)
       .single();
 
-    if (jobData) {
-      jobContext = `Title: ${jobData.title || "Unknown"}\nDescription: ${
-        jobData.description || "Not provided"
+    if (searchData) {
+      searchContext = `Title: ${searchData.title || "Unknown"}\nDescription: ${
+        searchData.description || "Not provided"
       }`;
     }
 
-    // 2) Score resume with Gemini using the target job description
-    const geminiResult = await parseResumeWithGemini(extractedText, jobContext);
+    // 2) Score resume with Gemini using the target search campaign description
+    const geminiResult = await parseResumeWithGemini(extractedText, searchContext);
 
     if (!geminiResult.success) {
       await supabaseAdmin
@@ -102,12 +102,12 @@ async function analyzeResumeBackground(
       })
       .eq("id", id);
   } finally {
-    if (jobId) {
+    if (searchId) {
       try {
-        const { checkAndSendJobNotification } = await import("@/lib/mail");
-        await checkAndSendJobNotification(supabaseAdmin, userId, jobId);
+        const { checkAndSendSearchNotification } = await import("@/lib/mail");
+        await checkAndSendSearchNotification(supabaseAdmin, userId, searchId);
       } catch (mailErr) {
-        console.error("Failed to trigger job completion email notification:", mailErr);
+        console.error("Failed to trigger search criteria completion email notification:", mailErr);
       }
     }
   }
@@ -115,9 +115,9 @@ async function analyzeResumeBackground(
 
 export async function POST(
   req: Request,
-  { params }: { params: Promise<{ jobId: string }> },
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const { jobId } = await params;
+  const { id: searchId } = await params;
   const supabase = await createSupabaseServerClient();
   const { data: auth } = await supabase.auth.getUser();
   if (!auth.user) {
@@ -130,19 +130,18 @@ export async function POST(
       return NextResponse.json({ error: "Missing resumeIds" }, { status: 400 });
     }
 
-    // Verify job exists and belongs to the user
-    const { data: job, error: jobErr } = await supabase
+    // Verify search exists and belongs to the user
+    const { data: search, error: searchErr } = await supabase
       .from("jobs")
       .select("id")
-      .eq("id", jobId)
+      .eq("id", searchId)
       .single();
 
-    if (jobErr || !job) {
-      return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    if (searchErr || !search) {
+      return NextResponse.json({ error: "Search criteria not found" }, { status: 404 });
     }
 
     const importedIds: string[] = [];
-    const skippedCount: number = 0;
 
     for (const resumeId of resumeIds) {
       // 1) Fetch source resume
@@ -154,17 +153,17 @@ export async function POST(
         .single();
 
       if (srcErr || !srcResume) {
-        continue; // Skip if resume doesn't exist or isn't owned by user
+        continue;
       }
 
-      // 2) Check for duplicates already in this job
+      // 2) Check for duplicates already in this search campaign
       let hasDuplicate = false;
       const email = srcResume.email?.trim().toLowerCase();
       if (email) {
         const { data: dup } = await supabase
           .from("resumes")
           .select("id")
-          .eq("job_id", jobId)
+          .eq("job_id", searchId)
           .eq("email", email)
           .limit(1);
         if (dup && dup.length > 0) hasDuplicate = true;
@@ -172,22 +171,22 @@ export async function POST(
         const { data: dup } = await supabase
           .from("resumes")
           .select("id")
-          .eq("job_id", jobId)
+          .eq("job_id", searchId)
           .eq("original_filename", srcResume.original_filename)
           .limit(1);
         if (dup && dup.length > 0) hasDuplicate = true;
       }
 
       if (hasDuplicate) {
-        continue; // Prevent importing duplicate candidates to the same job
+        continue;
       }
 
-      // 3) Create a new resume record linked to the target job
+      // 3) Create a new resume record linked to the target search campaign (mapped to job_id column)
       const { data: newRow, error: insErr } = await supabase
         .from("resumes")
         .insert({
           owner_id: auth.user.id,
-          job_id: jobId,
+          job_id: searchId,
           source: "upload",
           original_filename: srcResume.original_filename,
           storage_bucket: srcResume.storage_bucket,
@@ -200,7 +199,7 @@ export async function POST(
           location: srcResume.location,
           extracted_text: srcResume.extracted_text,
           parsed_json: srcResume.parsed_json,
-          status: "uploaded", // valid processing state, triggers UI polling
+          status: "uploaded",
         })
         .select("id")
         .single();
@@ -214,7 +213,7 @@ export async function POST(
       // 4) Score the cloned candidate in the background
       analyzeResumeBackground(
         auth.user.id,
-        jobId,
+        searchId,
         newRow.id,
         srcResume.extracted_text || "",
         srcResume.original_filename,

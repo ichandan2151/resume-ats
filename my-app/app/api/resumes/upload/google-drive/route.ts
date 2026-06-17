@@ -13,8 +13,9 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { fileId, accessToken, fileName, mimeType, jobId: jobIdRaw, staggerIndex } = body;
-    const jobId = typeof jobIdRaw === "string" && jobIdRaw.trim() ? jobIdRaw.trim() : null;
+    const { fileId, accessToken, fileName, mimeType, id: idRaw, jobId: jobIdRaw, staggerIndex } = body;
+    const jobIdRawFinal = idRaw || jobIdRaw;
+    const jobId = typeof jobIdRawFinal === "string" && jobIdRawFinal.trim() ? jobIdRawFinal.trim() : null;
 
     if (!fileId) return NextResponse.json({ error: "Missing fileId" }, { status: 400 });
     if (!accessToken) return NextResponse.json({ error: "Missing accessToken" }, { status: 400 });

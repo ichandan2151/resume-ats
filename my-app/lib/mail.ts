@@ -12,22 +12,22 @@ export interface NotificationResume {
 interface SendEmailParams {
   toEmail: string;
   fullName: string | null;
-  jobTitle: string;
-  jobId: string;
+  searchTitle: string;
+  searchId: string;
   resumes: NotificationResume[];
 }
 
 export async function sendResumeStatusNotification({
   toEmail,
   fullName,
-  jobTitle,
-  jobId,
+  searchTitle,
+  searchId,
   resumes,
 }: SendEmailParams) {
   if (resumes.length === 0) return;
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-  const jobLink = `${appUrl}/jobs/${jobId}`;
+  const jobLink = `${appUrl}/search-candidate/${searchId}`;
 
   // Count successes and failures
   const processedCount = resumes.filter((r) => r.status === "scored").length;
@@ -84,7 +84,7 @@ export async function sendResumeStatusNotification({
     })
     .join("");
 
-  const emailSubject = `Resume Parsing Completed for ${jobTitle}`;
+  const emailSubject = `Resume Parsing Completed for ${searchTitle}`;
 
   // Premium, modern, responsive HTML body
   const emailHtml = `
@@ -106,7 +106,7 @@ export async function sendResumeStatusNotification({
               <tr>
                 <td style="background: linear-gradient(135deg, #18181b 0%, #27272a 100%); padding: 32px; text-align: center;">
                   <h1 style="margin: 0; font-size: 20px; font-weight: 700; color: #ffffff; letter-spacing: -0.025em; text-transform: uppercase;">
-                    Resume ATS Notification
+                    Search Candidate Notification
                   </h1>
                 </td>
               </tr>
@@ -118,7 +118,7 @@ export async function sendResumeStatusNotification({
                     ${greeting}
                   </p>
                   <p style="margin-top: 0; margin-bottom: 24px; font-size: 15px; line-height: 24px; color: #71717a;">
-                    Resume parsing and Gemini evaluation has completed for your job opening <strong>${jobTitle}</strong>. 
+                    Resume parsing and Gemini evaluation has completed for your search campaign <strong>${searchTitle}</strong>. 
                     Here is a summary of the results:
                   </p>
                   
@@ -152,7 +152,7 @@ export async function sendResumeStatusNotification({
                     <tr>
                       <td align="center">
                         <a href="${jobLink}" target="_blank" style="display: inline-block; background-color: #18181b; color: #ffffff; font-family: sans-serif; font-size: 15px; font-weight: 600; text-decoration: none; padding: 14px 28px; border-radius: 8px; border: 1px solid #18181b; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
-                          View Candidates Dashboard
+                          View Search Dashboard
                         </a>
                       </td>
                     </tr>
@@ -242,19 +242,19 @@ export async function sendResumeStatusNotification({
   return { success: false, reason: "credentials_missing" };
 }
 
-export async function checkAndSendJobNotification(
+export async function checkAndSendSearchNotification(
   supabaseAdmin: any,
   userId: string,
-  jobId: string | null
+  searchId: string | null
 ) {
-  if (!jobId) return;
+  if (!searchId) return;
 
   try {
-    // 1. Check if there are any resumes for this job still processing
+    // 1. Check if there are any resumes for this search criteria still processing
     const { data: processingResumes, error: procErr } = await supabaseAdmin
       .from("resumes")
       .select("id")
-      .eq("job_id", jobId)
+      .eq("job_id", searchId)
       .eq("status", "uploaded");
 
     if (procErr) {
@@ -264,15 +264,15 @@ export async function checkAndSendJobNotification(
 
     // If there are still processing resumes, do nothing
     if (processingResumes && processingResumes.length > 0) {
-      console.log(`[Mail] Job ${jobId} has ${processingResumes.length} resumes still processing. Delaying notification.`);
+      console.log(`[Mail] Campaign ${searchId} has ${processingResumes.length} resumes still processing. Delaying notification.`);
       return;
     }
 
-    // 2. No resumes are processing. Let's find scored/error resumes for this job.
+    // 2. No resumes are processing. Let's find scored/error resumes for this search criteria.
     const { data: resumes, error: resErr } = await supabaseAdmin
       .from("resumes")
       .select("id, original_filename, status, score, parsed_json")
-      .eq("job_id", jobId)
+      .eq("job_id", searchId)
       .in("status", ["scored", "error"]);
 
     if (resErr || !resumes) {
@@ -286,24 +286,24 @@ export async function checkAndSendJobNotification(
     );
 
     if (unnotifiedResumes.length === 0) {
-      console.log(`[Mail] All parsed resumes for job ${jobId} have already been notified.`);
+      console.log(`[Mail] All parsed resumes for campaign ${searchId} have already been notified.`);
       return;
     }
 
-    console.log(`[Mail] Found ${unnotifiedResumes.length} unnotified resumes for job ${jobId}. Gathering context...`);
+    console.log(`[Mail] Found ${unnotifiedResumes.length} unnotified resumes for campaign ${searchId}. Gathering context...`);
 
-    // 3. Fetch job title and owner details
+    // 3. Fetch search candidate details (from jobs table) and owner details
     const [jobRes, profileRes] = await Promise.all([
-      supabaseAdmin.from("jobs").select("title").eq("id", jobId).single(),
+      supabaseAdmin.from("jobs").select("title").eq("id", searchId).single(),
       supabaseAdmin.from("profiles").select("email, full_name").eq("id", userId).maybeSingle(),
     ]);
 
     if (jobRes.error || !jobRes.data) {
-      console.error("[Mail] Error fetching job details for email:", jobRes.error);
+      console.error("[Mail] Error fetching search details for email:", jobRes.error);
       return;
     }
 
-    const jobTitle = jobRes.data.title;
+    const searchTitle = jobRes.data.title;
     let toEmail = profileRes.data?.email;
     let fullName = profileRes.data?.full_name || null;
 
@@ -335,14 +335,14 @@ export async function checkAndSendJobNotification(
     const sendRes = await sendResumeStatusNotification({
       toEmail,
       fullName,
-      jobTitle,
-      jobId,
+      searchTitle,
+      searchId,
       resumes: notificationResumes,
     });
 
     // 5. Update notified = true in parsed_json for all these resumes if successfully sent or credentials missing (to avoid looping attempts)
     if (sendRes && (sendRes.success || sendRes.reason === "credentials_missing")) {
-      console.log(`[Mail] Updating notified flag to true for ${unnotifiedResumes.length} resumes in job ${jobId}`);
+      console.log(`[Mail] Updating notified flag to true for ${unnotifiedResumes.length} resumes in campaign ${searchId}`);
       for (const resume of unnotifiedResumes) {
         const updatedParsed = {
           ...(resume.parsed_json || {}),
@@ -360,7 +360,7 @@ export async function checkAndSendJobNotification(
       }
     }
   } catch (err) {
-    console.error("[Mail] checkAndSendJobNotification execution failed:", err);
+    console.error("[Mail] checkAndSendSearchNotification execution failed:", err);
   }
 }
 

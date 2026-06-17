@@ -22,7 +22,7 @@ export async function GET(req: Request) {
   // Query all candidates belonging to the user
   let query = supabase
     .from("resumes")
-    .select("id, original_filename, full_name, email, phone, score, status, created_at, parsed_json, job_id")
+    .select("id, original_filename, full_name, email, phone, score, status, created_at, parsed_json, job_id, storage_path, storage_bucket")
     .eq("owner_id", auth.user.id)
     .order("created_at", { ascending: false });
 
@@ -53,19 +53,34 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Deduplicate by email in memory
+  // Deduplicate by email, storage_path, or original_filename in memory
   const seenEmails = new Set<string>();
+  const seenStoragePaths = new Set<string>();
+  const seenFilenames = new Set<string>();
   const uniqueCandidates: typeof data = [];
 
   for (const resume of (data || [])) {
     const email = resume.email?.trim().toLowerCase();
+    const storagePath = resume.storage_path;
+    const filename = resume.original_filename;
+
     if (email) {
       if (!seenEmails.has(email)) {
         seenEmails.add(email);
+        if (storagePath) seenStoragePaths.add(storagePath);
+        uniqueCandidates.push(resume);
+      }
+    } else if (storagePath) {
+      if (!seenStoragePaths.has(storagePath)) {
+        seenStoragePaths.add(storagePath);
+        uniqueCandidates.push(resume);
+      }
+    } else if (filename) {
+      if (!seenFilenames.has(filename)) {
+        seenFilenames.add(filename);
         uniqueCandidates.push(resume);
       }
     } else {
-      // If there is no email, treat each resume upload as a unique candidate entry
       uniqueCandidates.push(resume);
     }
   }

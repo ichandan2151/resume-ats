@@ -72,7 +72,9 @@ export default function LoginPage() {
     try {
       // Note: requires Auth URL config redirect to a reset page later.
       // Keeping it simple: this still sends email if Supabase is configured.
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      });
       if (error) throw error;
       setMsg("Password reset email sent (if the account exists).");
     } catch (e: any) {
@@ -273,7 +275,7 @@ export default function LoginPage() {
             </button>
 
             {/* Toggle Switch Hint at Bottom */}
-            <div className="flex items-center justify-center gap-1.5 pt-2 text-xs text-zinc-500 dark:text-zinc-550">
+            <div className="flex items-center justify-center gap-1.5 pt-2 text-xs text-zinc-500 dark:text-zinc-500">
               {mode === "signin" ? (
                 <>
                   <span>New to Patternix?</span>

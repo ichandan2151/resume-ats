@@ -254,7 +254,7 @@ export async function parseResumeWithGemini(
     - SCORING: If the Job Context is "Not provided" or vague, score the candidate based on their general strength as a professional. Otherwise, strictly score their relevance to the actual job description. Be objective.
   `;
 
-  const maxRetries = 3;
+  const maxRetries = 0;
   let delay = 5000; // start with 5 seconds
   let lastError: any = null;
 

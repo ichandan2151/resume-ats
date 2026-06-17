@@ -14,7 +14,7 @@ type ResumeRow = {
   parsed_json: any;
 };
 
-type Job = {
+type SearchCandidate = {
   id: string;
   title: string;
   company: string | null;
@@ -23,16 +23,16 @@ type Job = {
   created_at: string;
 };
 
-export default function JobClient({ jobId }: { jobId: string }) {
+export default function SearchCandidateClient({ id }: { id: string }) {
   const [rows, setRows] = useState<ResumeRow[]>([]);
-  const [selectedJobResumeIds, setSelectedJobResumeIds] = useState<Set<string>>(new Set());
+  const [selectedSearchResumeIds, setSelectedSearchResumeIds] = useState<Set<string>>(new Set());
   const [deleteMultipleOpen, setDeleteMultipleOpen] = useState(false);
-  const [job, setJob] = useState<Job | null>(null);
+  const [searchCandidate, setSearchCandidate] = useState<SearchCandidate | null>(null);
   const [showTour, setShowTour] = useState(false);
   const [tourStep, setTourStep] = useState(0);
 
   useEffect(() => {
-    const tourCompleted = localStorage.getItem("patternix_job_onboarding_completed");
+    const tourCompleted = localStorage.getItem("patternix_search_onboarding_completed");
     if (!tourCompleted) {
       setShowTour(true);
     }
@@ -53,7 +53,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
   };
 
   const handleCompleteTour = () => {
-    localStorage.setItem("patternix_job_onboarding_completed", "true");
+    localStorage.setItem("patternix_search_onboarding_completed", "true");
     setShowTour(false);
     setTourStep(0);
   };
@@ -68,36 +68,113 @@ export default function JobClient({ jobId }: { jobId: string }) {
   const [loadingList, setLoadingList] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const [uploadOpen, setUploadOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
 
-  const [file, setFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
+  // Import from Directory States
+  const [importDirectoryOpen, setImportDirectoryOpen] = useState(false);
+  const [dirCandidates, setDirCandidates] = useState<any[]>([]);
+  const [dirLoading, setDirLoading] = useState(false);
+  const [dirPage, setDirPage] = useState(1);
+  const [dirTotalPages, setDirTotalPages] = useState(1);
+  const [dirTotalCount, setDirTotalCount] = useState(0);
+  const [dirSearchQuery, setDirSearchQuery] = useState("");
+  const [selectedDirIds, setSelectedDirIds] = useState<Set<string>>(new Set());
+  const [importingDir, setImportingDir] = useState(false);
 
-  // Google APIs States
-  const [gapiLoaded, setGapiLoaded] = useState(false);
-  const [gisLoaded, setGisLoaded] = useState(false);
-  const [googleAuthToken, setGoogleAuthToken] = useState<string | null>(null);
-  const [driveImporting, setDriveImporting] = useState(false);
+  const fetchDirectoryCandidates = async (pageNumber = 1) => {
+    setDirLoading(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/resumes?page=${pageNumber}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? "Failed to fetch directory candidates");
+      setDirCandidates(json.data ?? []);
+      setDirTotalPages(json.totalPages ?? 1);
+      setDirTotalCount(json.totalCount ?? 0);
+      setDirPage(json.page ?? 1);
+    } catch (e: any) {
+      setErr(e.message ?? "Error fetching directory candidates");
+    } finally {
+      setDirLoading(false);
+    }
+  };
 
-  // Google Drive Bulk Import Queue & Progress UI State
-  const [importState, setImportState] = useState<{
-    status: 'idle' | 'scanning' | 'importing' | 'completed';
-    total: number;
-    current: number;
-    currentFileName: string;
-    successCount: number;
-    failCount: number;
-    errors: Array<{ name: string; error: string }>;
-  }>({
-    status: 'idle',
-    total: 0,
-    current: 0,
-    currentFileName: '',
-    successCount: 0,
-    failCount: 0,
-    errors: [],
-  });
+  useEffect(() => {
+    if (importDirectoryOpen) {
+      fetchDirectoryCandidates(dirPage);
+    }
+  }, [importDirectoryOpen, dirPage]);
+
+  async function handleImportFromDirectory() {
+    if (selectedDirIds.size === 0) return;
+    setImportingDir(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/search-candidate/${id}/resumes/import`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          resumeIds: Array.from(selectedDirIds),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? "Import failed");
+      
+      setImportDirectoryOpen(false);
+      setSelectedDirIds(new Set());
+      await refreshResumes();
+    } catch (e: any) {
+      setErr(e.message ?? "Failed to import candidates");
+    } finally {
+      setImportingDir(false);
+    }
+  }
+
+  const existingEmails = useMemo(() => {
+    return new Set(
+      rows
+        .map((r) => r.email?.trim().toLowerCase())
+        .filter(Boolean)
+    );
+  }, [rows]);
+
+  const existingFilenames = useMemo(() => {
+    return new Set(
+      rows
+        .map((r) => r.original_filename?.trim().toLowerCase())
+        .filter(Boolean)
+    );
+  }, [rows]);
+
+  const isAlreadyInSearch = (c: any) => {
+    const email = c.email?.trim().toLowerCase();
+    const filename = c.original_filename?.trim().toLowerCase();
+    return !!((email && existingEmails.has(email)) || (filename && existingFilenames.has(filename)));
+  };
+
+  const [hasOpenedProcessingPopup, setHasOpenedProcessingPopup] = useState(false);
+  const [processingPopupOpen, setProcessingPopupOpen] = useState(false);
+
+  const anyProcessing = useMemo(() => {
+    return rows.some((r) => r.status === "uploaded" || r.status === "processing");
+  }, [rows]);
+
+  const processingCount = useMemo(() => {
+    return rows.filter((r) => r.status === "uploaded" || r.status === "processing").length;
+  }, [rows]);
+
+  useEffect(() => {
+    if (!initialLoad && !hasOpenedProcessingPopup) {
+      if (anyProcessing) {
+        setProcessingPopupOpen(true);
+        setHasOpenedProcessingPopup(true);
+      }
+    }
+  }, [initialLoad, anyProcessing, hasOpenedProcessingPopup]);
+
+
 
   // filters
   const [locationFilter, setLocationFilter] = useState("");
@@ -105,6 +182,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
   const [visaFilter, setVisaFilter] = useState("");
   const [workAuthFilter, setWorkAuthFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
 
   const hasActiveFilters = useMemo(() => {
     return !!(
@@ -126,7 +204,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
     
     const params = new URLSearchParams();
     params.set("page", "1");
-    fetch(`/api/jobs/${jobId}/resumes?${params.toString()}`)
+    fetch(`/api/search-candidate/${id}/resumes?${params.toString()}`)
       .then(res => res.json())
       .then(json => {
         setRows(json.data ?? []);
@@ -147,8 +225,8 @@ export default function JobClient({ jobId }: { jobId: string }) {
   );
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  // delete job modal
-  const [deleteJobOpen, setDeleteJobOpen] = useState(false);
+  // delete searchCandidate modal
+  const [deleteSearchOpen, setDeleteSearchOpen] = useState(false);
 
   // retry state
   const [retryingIds, setRetryingIds] = useState<Set<string>>(new Set());
@@ -176,11 +254,11 @@ export default function JobClient({ jobId }: { jobId: string }) {
     });
   }, [rows, sortField, sortDirection]);
 
-  async function loadJob() {
-    const res = await fetch(`/api/jobs/${jobId}`);
+  async function loadSearchCandidate() {
+    const res = await fetch(`/api/search-candidate/${id}`);
     const json = await res.json();
-    if (!res.ok) throw new Error(json?.error ?? "Failed to load job");
-    setJob(json.data);
+    if (!res.ok) throw new Error(json?.error ?? "Failed to load searchCandidate");
+    setSearchCandidate(json.data);
   }
 
   async function refreshResumes(targetPage = page) {
@@ -196,21 +274,21 @@ export default function JobClient({ jobId }: { jobId: string }) {
       params.set("status", statusFilter.trim());
     params.set("page", String(targetPage));
 
-    const res = await fetch(`/api/jobs/${jobId}/resumes?${params.toString()}`);
+    const res = await fetch(`/api/search-candidate/${id}/resumes?${params.toString()}`);
     const json = await res.json();
     if (!res.ok) throw new Error(json?.error ?? "Failed to load candidates");
     setRows(json.data ?? []);
     setTotalCount(json.totalCount ?? 0);
     setTotalPages(json.totalPages ?? 1);
     setServerAvgScore(json.avgScore ?? null);
-    setSelectedJobResumeIds(new Set());
+    setSelectedSearchResumeIds(new Set());
   }
 
   async function refreshAll() {
     setLoadingList(true);
     setErr(null);
     try {
-      await Promise.all([loadJob(), refreshResumes(page)]);
+      await Promise.all([loadSearchCandidate(), refreshResumes(page)]);
     } catch (e: any) {
       setErr(e.message ?? "Error");
     } finally {
@@ -220,10 +298,18 @@ export default function JobClient({ jobId }: { jobId: string }) {
   }
 
   useEffect(() => {
-    if (!jobId) return;
+    if (!id) return;
     refreshAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId]);
+  }, [id]);
+
+  useEffect(() => {
+    if (!initialLoad) {
+      setPage(1);
+      refreshResumes(1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locationFilter, minExpFilter, visaFilter, workAuthFilter, statusFilter]);
 
   // Polling mechanism: if any resume is "uploaded", refresh every 5s
   useEffect(() => {
@@ -250,330 +336,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
     }
   }
 
-  // Load Google APIs
-  useEffect(() => {
-    // 1. Load GAPI (Google API client)
-    const gapiScript = document.createElement("script");
-    gapiScript.src = "https://apis.google.com/js/api.js";
-    gapiScript.async = true;
-    gapiScript.defer = true;
-    gapiScript.onload = () => {
-      if ((window as any).gapi) {
-        setGapiLoaded(true);
-      } else {
-        console.error("gapi load failed");
-      }
-    };
-    document.body.appendChild(gapiScript);
 
-    // 2. Load GIS (Google Identity Services)
-    const gisScript = document.createElement("script");
-    gisScript.src = "https://accounts.google.com/gsi/client";
-    gisScript.async = true;
-    gisScript.defer = true;
-    gisScript.onload = () => {
-      if ((window as any).google) {
-        setGisLoaded(true);
-      } else {
-        console.error("gis load failed");
-      }
-    };
-    document.body.appendChild(gisScript);
-
-    return () => {
-      document.body.removeChild(gapiScript);
-      document.body.removeChild(gisScript);
-    };
-  }, []);
-
-  // Trigger Google Sign-In and retrieve a fresh OAuth Access Token
-  function getGoogleAuthTokenAndOpenPicker(mode: 'files' | 'folder') {
-    if (!process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || !process.env.NEXT_PUBLIC_GOOGLE_API_KEY) {
-      setErr("Google Integration keys are not configured. Please add NEXT_PUBLIC_GOOGLE_CLIENT_ID and NEXT_PUBLIC_GOOGLE_API_KEY to your .env.local.");
-      return;
-    }
-
-    setDriveImporting(true);
-    setErr(null);
-
-    try {
-      const client = (window as any).google.accounts.oauth2.initTokenClient({
-        client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
-        scope: "https://www.googleapis.com/auth/drive.readonly",
-        callback: async (response: any) => {
-          if (response.error !== undefined) {
-            console.error("GIS Error:", response);
-            setErr(`Google Auth failed: ${response.error}`);
-            setDriveImporting(false);
-            return;
-          }
-          if (response.access_token) {
-            setGoogleAuthToken(response.access_token);
-            createPicker(response.access_token, mode);
-          } else {
-            setDriveImporting(false);
-          }
-        },
-      });
-
-      client.requestAccessToken();
-    } catch (e: any) {
-      console.error("Init token client failed", e);
-      setErr(`Google Picker failed to open: ${e?.message ?? String(e)}`);
-      setDriveImporting(false);
-    }
-  }
-
-  // Create and open the Google Picker dialog (configured for files multi-select or folder select)
-  function createPicker(accessToken: string, mode: 'files' | 'folder') {
-    (window as any).gapi.load("picker", {
-      callback: () => {
-        try {
-          const pickerBuilder = new (window as any).google.picker.PickerBuilder()
-            .setOAuthToken(accessToken)
-            .setDeveloperKey(process.env.NEXT_PUBLIC_GOOGLE_API_KEY)
-            .setCallback((data: any) => pickerCallback(data, accessToken, mode));
-
-          if (mode === 'files') {
-            const view = new (window as any).google.picker.DocsView((window as any).google.picker.ViewId.DOCS);
-            view.setMimeTypes("application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain");
-            pickerBuilder
-              .addView(view)
-              .enableFeature((window as any).google.picker.Feature.MULTISELECT_ENABLED)
-              .setTitle("Select Candidate Resumes");
-          } else {
-            const view = new (window as any).google.picker.DocsView((window as any).google.picker.ViewId.FOLDERS);
-            view.setMimeTypes("application/vnd.google-apps.folder");
-            view.setSelectFolderEnabled(true);
-            pickerBuilder
-              .addView(view)
-              .setTitle("Select Google Drive Folder");
-          }
-
-          const picker = pickerBuilder.build();
-          picker.setVisible(true);
-        } catch (e: any) {
-          console.error("Picker build failed", e);
-          setErr(`Google Picker error: ${e?.message ?? String(e)}`);
-          setDriveImporting(false);
-        }
-      }
-    });
-  }
-
-  // Recursively fetch all files within selected Google Drive folder
-  async function fetchAllFilesInFolder(folderId: string, folderName: string, accessToken: string): Promise<any[]> {
-    setImportState({
-      status: 'scanning',
-      total: 0,
-      current: 0,
-      currentFileName: `Scanning folder "${folderName}"...`,
-      successCount: 0,
-      failCount: 0,
-      errors: [],
-    });
-
-    const allFiles: any[] = [];
-    const foldersToScan = [{ id: folderId, name: folderName }];
-
-    while (foldersToScan.length > 0) {
-      const currentFolder = foldersToScan.shift()!;
-      setImportState(prev => ({
-        ...prev,
-        currentFileName: `Scanning folder "${currentFolder.name}"...`,
-      }));
-
-      let pageToken: string | undefined = undefined;
-      do {
-        const query: string = encodeURIComponent(`'${currentFolder.id}' in parents and trashed = false`);
-        const url: string = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=nextPageToken,files(id,name,mimeType)${pageToken ? `&pageToken=${pageToken}` : ''}`;
-        
-        const response: Response = await fetch(url, {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        });
-
-        if (!response.ok) {
-          const errText = await response.text();
-          throw new Error(`Failed to list files in folder "${currentFolder.name}": ${errText}`);
-        }
-
-        const data = await response.json();
-        const files = data.files ?? [];
-
-        for (const file of files) {
-          if (file.mimeType === "application/vnd.google-apps.folder") {
-            foldersToScan.push({ id: file.id, name: file.name });
-          } else {
-            // Check if it's a supported file type by extension or mime type
-            const lowerName = file.name.toLowerCase();
-            const isSupported = 
-              file.mimeType === "application/pdf" || 
-              file.mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || 
-              file.mimeType === "text/plain" ||
-              /\.(pdf|docx|txt)$/i.test(lowerName);
-
-            if (isSupported) {
-              allFiles.push(file);
-            }
-          }
-        }
-        pageToken = data.nextPageToken;
-      } while (pageToken);
-    }
-
-    return allFiles;
-  }
-
-  // Handle sequentially uploading multiple files with staggering index
-  async function startFilesImport(docs: any[], accessToken: string) {
-    setImportState({
-      status: 'importing',
-      total: docs.length,
-      current: 0,
-      currentFileName: '',
-      successCount: 0,
-      failCount: 0,
-      errors: [],
-    });
-
-    for (let i = 0; i < docs.length; i++) {
-      const doc = docs[i];
-      setImportState(prev => ({
-        ...prev,
-        current: i + 1,
-        currentFileName: doc.name,
-      }));
-
-      try {
-        const res = await fetch("/api/resumes/upload/google-drive", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            fileId: doc.id,
-            accessToken,
-            fileName: doc.name,
-            mimeType: doc.mimeType,
-            jobId,
-            staggerIndex: i, // pass staggering delay index
-          }),
-        });
-
-        const json = await res.json();
-        if (!res.ok) throw new Error(json?.error ?? "Upload failed");
-
-        setImportState(prev => ({
-          ...prev,
-          successCount: prev.successCount + 1,
-        }));
-        
-        // Dynamic staggered refreshes so they populate live in table
-        refreshResumes().catch(console.error);
-      } catch (err: any) {
-        console.error("File import failed:", doc.name, err);
-        setImportState(prev => ({
-          ...prev,
-          failCount: prev.failCount + 1,
-          errors: [...prev.errors, { name: doc.name, error: err.message ?? "Unknown error" }],
-        }));
-      }
-
-      // 500ms delay between API posts to spread out upload request load
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-
-    setImportState(prev => ({
-      ...prev,
-      status: 'completed',
-    }));
-
-    refreshResumes().catch(console.error);
-  }
-
-  // Handle recursively importing files inside folder
-  async function startFolderImport(folderId: string, folderName: string, accessToken: string) {
-    try {
-      const files = await fetchAllFilesInFolder(folderId, folderName, accessToken);
-      if (files.length === 0) {
-        setImportState({
-          status: 'completed',
-          total: 0,
-          current: 0,
-          currentFileName: 'No supported files (PDF, DOCX, TXT) found in this folder.',
-          successCount: 0,
-          failCount: 0,
-          errors: [],
-        });
-        return;
-      }
-      await startFilesImport(files, accessToken);
-    } catch (err: any) {
-      console.error("Folder scan failed:", err);
-      setImportState({
-        status: 'completed',
-        total: 0,
-        current: 0,
-        currentFileName: '',
-        successCount: 0,
-        failCount: 0,
-        errors: [{ name: folderName, error: err.message ?? "Failed to list folder contents" }],
-      });
-    }
-  }
-
-  // Handle the selection from Google Picker
-  async function pickerCallback(data: any, accessToken: string, mode: 'files' | 'folder') {
-    if (data.action === (window as any).google.picker.Action.PICKED) {
-      const docs = data.docs;
-      if (!docs || docs.length === 0) {
-        setDriveImporting(false);
-        return;
-      }
-
-      setUploadOpen(false); // Close upload modal immediately to let user see progress card
-
-      if (mode === 'folder') {
-        const folder = docs[0];
-        await startFolderImport(folder.id, folder.name, accessToken);
-      } else {
-        await startFilesImport(docs, accessToken);
-      }
-      setDriveImporting(false);
-    } else if (data.action === (window as any).google.picker.Action.CANCEL) {
-      setDriveImporting(false);
-    }
-  }
-
-  async function upload(e: React.FormEvent) {
-    e.preventDefault();
-    setErr(null);
-    if (!file) return;
-
-    setUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("jobId", jobId);
-
-      const res = await fetch("/api/resumes/upload", {
-        method: "POST",
-        body: fd,
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? "Upload failed");
-
-      setFile(null);
-      await refreshResumes();
-      setUploadOpen(false);
-    } catch (e: any) {
-      setErr(e.message ?? "Upload error");
-    } finally {
-      setUploading(false);
-    }
-  }
 
   async function retryResume(resumeId: string) {
     setRetryingIds((prev) => new Set(prev).add(resumeId));
@@ -605,17 +368,26 @@ export default function JobClient({ jobId }: { jobId: string }) {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
             </svg>
-            <div className="mt-4 text-sm text-zinc-400">Loading job details...</div>
+            <div className="mt-4 text-sm text-zinc-400">Loading search details...</div>
           </div>
         ) : (
         <>
-        <div className="flex items-center justify-between">
-          <a
-            href="/dashboard"
-            className="text-sm text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white transition"
-          >
-            Back to dashboard
-          </a>
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-zinc-200/60 dark:border-zinc-800/60 pb-5">
+          <div className="flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
+            <a
+              href="/dashboard"
+              className="hover:text-zinc-900 dark:hover:text-white transition flex items-center gap-1.5 font-medium"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+              Dashboard
+            </a>
+             <span className="text-zinc-400 dark:text-zinc-700">/</span>
+            <span className="text-zinc-800 dark:text-zinc-200 font-semibold truncate max-w-[240px]">
+              {searchCandidate?.title ?? "Campaign Details"}
+            </span>
+          </div>
           <div className="flex items-center gap-3">
             <ThemeToggle />
             <button
@@ -623,54 +395,89 @@ export default function JobClient({ jobId }: { jobId: string }) {
                 setTourStep(0);
                 setShowTour(true);
               }}
-              className="text-xs font-semibold text-violet-600 dark:text-violet-400 hover:text-violet-850 dark:hover:text-violet-300 transition cursor-pointer"
+              className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3.5 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 shadow-sm transition"
             >
               Tour Guide
             </button>
-            <div className="text-xs text-zinc-500">Job ID: {jobId}</div>
           </div>
         </div>
 
-        <div className="mt-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <div id="tour-job-header">
-            <h1 className="text-2xl font-semibold">{job?.title ?? "Job"}</h1>
-            <p className="mt-1 text-sm text-zinc-400">
-              {job?.company ?? "-"} - {job?.location ?? "-"}
-            </p>
-          </div>
-
-          <div id="tour-job-metrics" className="flex flex-wrap gap-2">
-            <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/30 px-4 py-2 text-sm text-zinc-800 dark:text-zinc-200">
-              <span className="text-zinc-500 dark:text-zinc-400">Candidates:</span>{" "}
-              <span className="font-semibold">{total}</span>
-            </div>
-            <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/30 px-4 py-2 text-sm text-zinc-800 dark:text-zinc-200">
-              <span className="text-zinc-500 dark:text-zinc-400">Avg score:</span>{" "}
-              <span className="font-semibold">
-                {avgScore == null ? "-" : avgScore.toFixed(1)}
+        <div className="mt-8 flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+          <div id="tour-searchCandidate-header" className="space-y-2">
+            <h1 className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-white">
+              {searchCandidate?.title ?? "SearchCandidate"}
+            </h1>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-zinc-500 dark:text-zinc-400">
+              <span className="font-semibold text-zinc-700 dark:text-zinc-300">
+                {searchCandidate?.company ?? "No Company"}
+              </span>
+              {searchCandidate?.location && (
+                <>
+                  <span className="text-zinc-300 dark:text-zinc-700">•</span>
+                  <span>📍 {searchCandidate.location}</span>
+                </>
+              )}
+              <span className="text-zinc-300 dark:text-zinc-700">•</span>
+              <span className="flex items-center gap-1">
+                <svg className="h-4 w-4 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                Created {searchCandidate ? new Date(searchCandidate.created_at).toLocaleDateString() : ""}
               </span>
             </div>
 
+            {/* Campaign Metrics Section */}
+            <div id="tour-searchCandidate-metrics" className="flex items-center gap-3 pt-1">
+              <div className="inline-flex items-center gap-1.5 rounded-lg bg-violet-50 dark:bg-violet-950 border border-violet-100 dark:border-violet-800 px-3 py-1 text-xs font-semibold text-violet-700 dark:text-violet-300">
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+                {total} Candidates
+              </div>
+              <div className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950 border border-emerald-100 dark:border-emerald-800 px-3 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+                </svg>
+                Avg Score: {avgScore == null ? "-" : avgScore.toFixed(1)}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5 lg:self-end">
             <button
               onClick={() => setDetailsOpen(true)}
-              className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/30 px-4 py-2 text-sm font-semibold text-zinc-800 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-900/60 transition cursor-pointer"
+              className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800/80 transition flex items-center gap-2 shadow-sm cursor-pointer"
             >
-              View job details
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Search Details
             </button>
 
             <button
-              id="tour-job-upload"
-              onClick={() => setUploadOpen(true)}
-              className="rounded-xl bg-zinc-900 dark:bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-50 dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-white transition cursor-pointer"
+              id="tour-searchCandidate-import"
+              onClick={() => {
+                setDirPage(1);
+                setSelectedDirIds(new Set());
+                setImportDirectoryOpen(true);
+              }}
+              className="rounded-xl bg-violet-600 hover:bg-violet-700 dark:bg-violet-600 dark:hover:bg-violet-700 px-4 py-2.5 text-sm font-semibold text-white transition flex items-center gap-2 shadow-md shadow-violet-500/10 cursor-pointer"
             >
-              Upload resumes
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+              </svg>
+              Import Candidates
             </button>
 
             <button
-              onClick={() => setDeleteJobOpen(true)}
-              className="rounded-xl bg-red-900/20 dark:bg-red-900/40 px-4 py-2 text-sm font-semibold text-red-600 dark:text-red-200 hover:bg-red-900/30 dark:hover:bg-red-900/60 transition cursor-pointer"
+              onClick={() => setDeleteSearchOpen(true)}
+              className="rounded-xl border border-red-200 dark:border-red-900/30 bg-red-50/50 dark:bg-red-900/10 px-4 py-2.5 text-sm font-semibold text-red-600 dark:text-red-400 hover:bg-red-100/60 dark:hover:bg-red-950/30 transition flex items-center gap-2 cursor-pointer"
+              title="Delete Search Campaign"
             >
-              Delete Job
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              Delete Campaign
             </button>
           </div>
         </div>
@@ -681,83 +488,99 @@ export default function JobClient({ jobId }: { jobId: string }) {
           </div>
         )}
 
-        {/* Filters */}
-        <div id="tour-job-filters" className="mt-6 flex flex-wrap gap-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/20 p-4 shadow-sm dark:shadow-none">
-          <input
-            value={locationFilter}
-            onChange={(e) => setLocationFilter(e.target.value)}
-            placeholder="Filter location..."
-            className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600"
-          />
-          <input
-            value={minExpFilter}
-            onChange={(e) => setMinExpFilter(e.target.value)}
-            type="number"
-            placeholder="Min Exp (years)"
-            className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600"
-          />
-          <select
-            value={visaFilter}
-            onChange={(e) => setVisaFilter(e.target.value)}
-            className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600"
-          >
-            <option value="">Any Visa Status</option>
-            <option value="citizen">Citizen</option>
-            <option value="green_card">Green Card</option>
-            <option value="h1b">H1B</option>
-          </select>
-          <select
-            value={workAuthFilter}
-            onChange={(e) => setWorkAuthFilter(e.target.value)}
-            className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600"
-          >
-            <option value="">Any Work Auth</option>
-            <option value="authorized">Authorized</option>
-            <option value="sponsorship">Sponsorship</option>
-          </select>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600"
-          >
-            <option value="">Any Candidate Status</option>
-            <option value="scored">Scored</option>
-            <option value="uploaded">Processing</option>
-            <option value="failed">Failed</option>
-          </select>
-          <button
-            onClick={() => {
-              setPage(1);
-              refreshResumes(1);
-            }}
-            className="rounded-lg bg-zinc-900 dark:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-white px-4 py-2 text-sm font-semibold text-zinc-50 dark:text-zinc-950 transition cursor-pointer"
-          >
-            Apply Filters
-          </button>
-          {hasActiveFilters && (
-            <button
-              onClick={handleClearFilters}
-              className="text-sm text-zinc-400 hover:text-white"
-            >
-              Clear
-            </button>
-          )}
-        </div>
-
         {/* Candidates table */}
-        <div id="tour-job-table" className="mt-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/20 shadow-sm dark:shadow-none">
+        <div id="tour-searchCandidate-table" className="mt-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/20 shadow-sm dark:shadow-none overflow-hidden">
           <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 px-5 py-4">
             <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
               Candidates
             </div>
-            <button
-              onClick={refreshAll}
-              disabled={loadingList}
-              className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900/30 px-3 py-2 text-xs font-semibold text-zinc-800 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-900/60 disabled:opacity-60 cursor-pointer"
-            >
-              {loadingList ? "Refreshing..." : "Refresh"}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowFilters(!showFilters)}
+                className={`rounded-xl border px-3 py-2 text-xs font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-900/60 transition cursor-pointer flex items-center gap-1.5 ${
+                  hasActiveFilters
+                    ? "text-violet-600 dark:text-violet-400 border-violet-200 dark:border-violet-800 bg-violet-50/30 dark:bg-violet-900/20"
+                    : "text-zinc-700 dark:text-zinc-200 border-zinc-200 dark:border-zinc-800 bg-zinc-100/50 dark:bg-zinc-900/30"
+                }`}
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                </svg>
+                {hasActiveFilters
+                  ? `Filters: ${[locationFilter, minExpFilter, visaFilter, workAuthFilter, statusFilter].filter(Boolean).length} Active`
+                  : "Filter"}
+              </button>
+
+              <button
+                onClick={refreshAll}
+                disabled={loadingList}
+                className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900/30 px-3 py-2 text-xs font-semibold text-zinc-800 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-900/60 disabled:opacity-60 cursor-pointer"
+              >
+                {loadingList ? "Refreshing..." : "Refresh"}
+              </button>
+            </div>
           </div>
+
+          {/* Integrated Collapsible Filters Drawer */}
+          {(showFilters || hasActiveFilters) && (
+            <div
+              id="tour-searchCandidate-filters"
+              className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/20 p-4 grid gap-3 grid-cols-1 sm:grid-cols-2 md:grid-cols-5 animate-fade-in"
+            >
+              <input
+                value={locationFilter}
+                onChange={(e) => setLocationFilter(e.target.value)}
+                placeholder="Filter location..."
+                className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600"
+              />
+              <input
+                value={minExpFilter}
+                onChange={(e) => setMinExpFilter(e.target.value)}
+                type="number"
+                placeholder="Min Exp (years)"
+                className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600"
+              />
+              <select
+                value={visaFilter}
+                onChange={(e) => setVisaFilter(e.target.value)}
+                className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600"
+              >
+                <option value="">Any Visa Status</option>
+                <option value="citizen">Citizen</option>
+                <option value="green_card">Green Card</option>
+                <option value="h1b">H1B</option>
+              </select>
+              <select
+                value={workAuthFilter}
+                onChange={(e) => setWorkAuthFilter(e.target.value)}
+                className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600"
+              >
+                <option value="">Any Work Auth</option>
+                <option value="authorized">Authorized</option>
+                <option value="sponsorship">Sponsorship</option>
+              </select>
+              <div className="flex items-center gap-2">
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="flex-1 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600"
+                >
+                  <option value="">Any Status</option>
+                  <option value="scored">Scored</option>
+                  <option value="uploaded">Processing</option>
+                  <option value="failed">Failed</option>
+                </select>
+                {hasActiveFilters && (
+                  <button
+                    onClick={handleClearFilters}
+                    className="text-xs text-red-500 hover:text-red-700 font-semibold transition cursor-pointer px-1"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           {rows.length === 0 ? (
             <div className="p-8">
@@ -778,15 +601,19 @@ export default function JobClient({ jobId }: { jobId: string }) {
               ) : (
                 <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 border-dashed p-8 text-center bg-zinc-50/50 dark:bg-zinc-900/10">
                   <div className="text-3xl mb-3">📂</div>
-                  <div className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">No resumes uploaded yet</div>
+                  <div className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">No candidates added yet</div>
                   <div className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-                    Upload a PDF, DOCX, TXT, or ZIP file containing multiple resumes to get started.
+                    Import candidates from the Candidate Directory to get started.
                   </div>
                   <button
-                    onClick={() => setUploadOpen(true)}
+                    onClick={() => {
+                      setDirPage(1);
+                      setSelectedDirIds(new Set());
+                      setImportDirectoryOpen(true);
+                    }}
                     className="mt-5 rounded-xl bg-zinc-950 border border-zinc-200 dark:border-zinc-800 dark:bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-300 dark:text-zinc-950 hover:bg-zinc-900 dark:hover:bg-white transition cursor-pointer"
                   >
-                    Upload resumes
+                    Import from Directory
                   </button>
                 </div>
               )}
@@ -800,16 +627,16 @@ export default function JobClient({ jobId }: { jobId: string }) {
                     type="checkbox"
                     checked={
                       rows.length > 0 &&
-                      rows.every((r) => selectedJobResumeIds.has(r.id))
+                      rows.every((r) => selectedSearchResumeIds.has(r.id))
                     }
                     ref={(el) => {
                       if (el) {
                         const allSelected =
                           rows.length > 0 &&
-                          rows.every((r) => selectedJobResumeIds.has(r.id));
+                          rows.every((r) => selectedSearchResumeIds.has(r.id));
                         const someSelected =
                           rows.length > 0 &&
-                          rows.some((r) => selectedJobResumeIds.has(r.id)) &&
+                          rows.some((r) => selectedSearchResumeIds.has(r.id)) &&
                           !allSelected;
                         el.indeterminate = someSelected;
                       }
@@ -817,25 +644,25 @@ export default function JobClient({ jobId }: { jobId: string }) {
                     onChange={() => {
                       const allSelected =
                         rows.length > 0 &&
-                        rows.every((r) => selectedJobResumeIds.has(r.id));
+                        rows.every((r) => selectedSearchResumeIds.has(r.id));
                       if (allSelected) {
-                        setSelectedJobResumeIds(new Set());
+                        setSelectedSearchResumeIds(new Set());
                       } else {
-                        setSelectedJobResumeIds(new Set(rows.map((r) => r.id)));
+                        setSelectedSearchResumeIds(new Set(rows.map((r) => r.id)));
                       }
                     }}
                     className="h-3.5 w-3.5 rounded border-zinc-300 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-violet-600 focus:ring-violet-500 cursor-pointer"
                   />
-                  {selectedJobResumeIds.size > 0 ? (
+                  {selectedSearchResumeIds.size > 0 ? (
                     <div className="flex items-center gap-2.5">
                       <span className="font-bold text-zinc-800 dark:text-zinc-200">
-                        {selectedJobResumeIds.size} selected
+                        {selectedSearchResumeIds.size} selected
                       </span>
                       <span className="text-zinc-300 dark:text-zinc-700">|</span>
                       <button
                         type="button"
                         onClick={() => setDeleteMultipleOpen(true)}
-                        className="text-red-655 dark:text-red-400 hover:underline cursor-pointer font-semibold"
+                        className="text-red-600 dark:text-red-400 hover:underline cursor-pointer font-semibold"
                       >
                         Delete Selected
                       </button>
@@ -875,10 +702,10 @@ export default function JobClient({ jobId }: { jobId: string }) {
                   )}
                 </div>
 
-                {selectedJobResumeIds.size > 0 && (
+                {selectedSearchResumeIds.size > 0 && (
                   <button
                     type="button"
-                    onClick={() => setSelectedJobResumeIds(new Set())}
+                    onClick={() => setSelectedSearchResumeIds(new Set())}
                     className="text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition cursor-pointer sm:ml-auto"
                   >
                     Clear Selection
@@ -890,12 +717,12 @@ export default function JobClient({ jobId }: { jobId: string }) {
               <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
                 {sortedRows.map((r) => (
                   <Fragment key={r.id}>
-                    <div className={`px-5 py-4 hover:bg-zinc-50 dark:hover:bg-zinc-900/20 transition-colors flex items-start gap-4 ${selectedJobResumeIds.has(r.id) ? "bg-violet-50/20 dark:bg-violet-950/5" : ""}`}>
+                    <div className={`px-5 py-4 hover:bg-zinc-50 dark:hover:bg-zinc-900/20 transition-colors flex items-start gap-4 ${selectedSearchResumeIds.has(r.id) ? "bg-violet-50/20 dark:bg-violet-950/5" : ""}`}>
                       <input
                         type="checkbox"
-                        checked={selectedJobResumeIds.has(r.id)}
+                        checked={selectedSearchResumeIds.has(r.id)}
                         onChange={() => {
-                          setSelectedJobResumeIds((prev) => {
+                          setSelectedSearchResumeIds((prev) => {
                             const next = new Set(prev);
                             if (next.has(r.id)) next.delete(r.id);
                             else next.add(r.id);
@@ -953,13 +780,9 @@ export default function JobClient({ jobId }: { jobId: string }) {
                         {r.phone && (
                           <span className="text-zinc-400 dark:text-zinc-500">{r.phone}</span>
                         )}
-                        {r.parsed_json?.candidate_location ? (
+                        {r.parsed_json?.candidate_location && (
                           <span className="rounded-md bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 px-1.5 py-0.5 text-zinc-700 dark:text-zinc-300">
                             📍 {r.parsed_json.candidate_location}
-                          </span>
-                        ) : (
-                          <span className="rounded-md bg-red-50 dark:bg-red-900/20 px-1.5 py-0.5 text-red-600 dark:text-red-400/80 border border-red-200 dark:border-red-900/30">
-                            Location missing
                           </span>
                         )}
                         {r.parsed_json?.years_experience != null && r.parsed_json.years_experience > 0 && (
@@ -967,22 +790,14 @@ export default function JobClient({ jobId }: { jobId: string }) {
                             {r.parsed_json.years_experience}y exp
                           </span>
                         )}
-                        {r.parsed_json?.visa_status ? (
-                          <span className="rounded-md bg-blue-50 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-900/30 px-1.5 py-0.5 text-blue-700 dark:text-blue-200">
+                        {r.parsed_json?.visa_status && (
+                          <span className="rounded-md bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 px-1.5 py-0.5 text-blue-700 dark:text-blue-300">
                             {r.parsed_json.visa_status.replace("_", " ")}
                           </span>
-                        ) : (
-                          <span className="rounded-md bg-red-50 dark:bg-red-900/20 px-1.5 py-0.5 text-red-600 dark:text-red-400/80 border border-red-200 dark:border-red-900/30">
-                            Visa missing
-                          </span>
                         )}
-                        {r.parsed_json?.work_authorization ? (
-                          <span className="rounded-md bg-indigo-50 dark:bg-indigo-900/40 border border-indigo-200 dark:border-indigo-900/30 px-1.5 py-0.5 text-indigo-700 dark:text-indigo-200">
+                        {r.parsed_json?.work_authorization && (
+                          <span className="rounded-md bg-indigo-50 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-800 px-1.5 py-0.5 text-indigo-700 dark:text-indigo-300">
                             {r.parsed_json.work_authorization}
-                          </span>
-                        ) : (
-                          <span className="rounded-md bg-red-50 dark:bg-red-900/20 px-1.5 py-0.5 text-red-600 dark:text-red-400/80 border border-red-200 dark:border-red-900/30">
-                            Auth missing
                           </span>
                         )}
                         {r.parsed_json?.error_code && (
@@ -1029,7 +844,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
                             >
                               View
                             </a>
-                            {(r.status === "failed" || r.status === "error") && r.parsed_json?.retryable && (
+                            {(r.status === "failed" || r.status === "error") && (
                               <button
                                 onClick={() => retryResume(r.id)}
                                 disabled={retryingIds.has(r.id)}
@@ -1072,20 +887,18 @@ export default function JobClient({ jobId }: { jobId: string }) {
                                   )}
                                 </div>
                                 <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed">{r.parsed_json.error}</p>
-                                {r.parsed_json.retryable && (
-                                  <button
-                                    onClick={() => retryResume(r.id)}
-                                    disabled={retryingIds.has(r.id)}
-                                    className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-amber-100 dark:bg-amber-900/40 border border-amber-200 dark:border-amber-800 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-900/60 disabled:opacity-50 transition-colors"
-                                  >
-                                    <svg className={`h-3.5 w-3.5 ${retryingIds.has(r.id) ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                    </svg>
-                                    {retryingIds.has(r.id) ? "Retrying..." : "Retry Parsing"}
-                                  </button>
-                                )}
+                                <button
+                                  onClick={() => retryResume(r.id)}
+                                  disabled={retryingIds.has(r.id)}
+                                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-amber-100 dark:bg-amber-900/40 border border-amber-200 dark:border-amber-800 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-900/60 disabled:opacity-50 transition-colors"
+                                >
+                                  <svg className={`h-3.5 w-3.5 ${retryingIds.has(r.id) ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                  </svg>
+                                  {retryingIds.has(r.id) ? "Retrying..." : "Retry Parsing"}
+                                </button>
                                 {!r.parsed_json.retryable && (
-                                  <p className="mt-2 text-xs text-zinc-500">This error is not retryable. Please check your configuration or re-upload the resume.</p>
+                                  <p className="mt-2 text-xs text-zinc-500">Note: If you have corrected the configuration/API key error, click Retry Parsing above to attempt parsing again.</p>
                                 )}
                               </div>
                             </div>
@@ -1135,7 +948,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
                                         <h5 className="font-semibold text-emerald-700 dark:text-emerald-400 mb-2">
                                           Strengths
                                         </h5>
-                                        <ul className="list-disc list-inside space-y-1 text-zinc-650 dark:text-zinc-400 text-xs">
+                                        <ul className="list-disc list-inside space-y-1 text-zinc-600 dark:text-zinc-400 text-xs">
                                           {r.parsed_json.scoring.breakdown.strengths.map(
                                             (s: string, i: number) => (
                                               <li key={i}>{s}</li>
@@ -1151,7 +964,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
                                         <h5 className="font-semibold text-rose-700 dark:text-rose-400 mb-2">
                                           Weaknesses / Missing
                                         </h5>
-                                        <ul className="list-disc list-inside space-y-1 text-zinc-650 dark:text-zinc-450 text-xs">
+                                        <ul className="list-disc list-inside space-y-1 text-zinc-600 dark:text-zinc-400 text-xs">
                                           {r.parsed_json.scoring.breakdown.weaknesses.map(
                                             (w: string, i: number) => (
                                               <li key={i}>{w}</li>
@@ -1405,117 +1218,54 @@ export default function JobClient({ jobId }: { jobId: string }) {
         )}
       </div>
 
-        {/* Google Drive Import Progress Card */}
-        {importState.status !== 'idle' && (
-          <div className="fixed bottom-6 right-6 z-[80] w-96 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-2xl transition-all duration-300">
-            <div className="flex items-start justify-between">
-              <div>
-                <h4 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
-                  {importState.status === 'scanning' ? (
-                    <>
-                      <svg className="h-4 w-4 animate-spin text-zinc-400" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                      </svg>
-                      Scanning Google Drive...
-                    </>
-                  ) : importState.status === 'importing' ? (
-                    <>
-                      <svg className="h-4 w-4 animate-spin text-blue-400" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                      </svg>
-                      Importing Resumes...
-                    </>
-                  ) : (
-                    <span className="text-emerald-400 flex items-center gap-1.5">
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                      Import Completed
-                    </span>
-                  )}
-                </h4>
-                <p className="mt-1 text-xs text-zinc-400 truncate max-w-[280px]">
-                  {importState.currentFileName || 'Preparing...'}
-                </p>
-              </div>
-              {importState.status === 'completed' && (
-                <button
-                  onClick={() => setImportState(prev => ({ ...prev, status: 'idle' }))}
-                  className="rounded-lg bg-zinc-800 p-1 text-zinc-400 hover:text-white cursor-pointer"
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              )}
-            </div>
 
-            {importState.status !== 'scanning' && importState.total > 0 && (
-              <div className="mt-4">
-                <div className="flex justify-between text-xs text-zinc-400 mb-1.5">
-                  <span>{importState.current} of {importState.total} files</span>
-                  <span>{Math.round((importState.current / importState.total) * 100)}%</span>
-                </div>
-                <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
-                  <div
-                    className="h-full bg-blue-500 transition-all duration-300 rounded-full"
-                    style={{ width: `${(importState.current / importState.total) * 100}%` }}
-                  />
-                </div>
 
-                <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
-                  <div className="rounded-lg bg-zinc-950/40 p-2">
-                    <div className="font-semibold text-zinc-400">Total</div>
-                    <div className="mt-0.5 text-sm font-bold text-zinc-200">{importState.total}</div>
-                  </div>
-                  <div className="rounded-lg bg-emerald-950/20 border border-emerald-900/30 p-2">
-                    <div className="font-semibold text-emerald-400">Success</div>
-                    <div className="mt-0.5 text-sm font-bold text-emerald-300">{importState.successCount}</div>
-                  </div>
-                  <div className="rounded-lg bg-red-950/20 border border-red-900/30 p-2">
-                    <div className="font-semibold text-red-400">Failed</div>
-                    <div className="mt-0.5 text-sm font-bold text-red-300">{importState.failCount}</div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {importState.errors.length > 0 && (
-              <div className="mt-3 max-h-32 overflow-y-auto rounded-lg bg-zinc-950/50 p-2 text-xs space-y-1 divide-y divide-zinc-800/40">
-                <div className="text-[10px] uppercase font-bold text-red-400 tracking-wider pb-1">Errors ({importState.errors.length})</div>
-                {importState.errors.map((err, i) => (
-                  <div key={i} className="pt-1 text-zinc-400 flex flex-col">
-                    <span className="font-semibold text-zinc-300 truncate">{err.name}</span>
-                    <span className="text-red-400/80 mt-0.5 text-[10px]">{err.error}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        <UploadModal
-          open={uploadOpen}
-          onClose={() => {
-            setUploadOpen(false);
-            setFile(null);
+        <ImportFromDirectoryModal
+          open={importDirectoryOpen}
+          onClose={() => setImportDirectoryOpen(false)}
+          candidates={dirCandidates}
+          loading={dirLoading}
+          page={dirPage}
+          totalPages={dirTotalPages}
+          totalCount={dirTotalCount}
+          onPageChange={setDirPage}
+          searchQuery={dirSearchQuery}
+          onSearchChange={setDirSearchQuery}
+          selectedIds={selectedDirIds}
+          onToggleSelect={(id) => {
+            setSelectedDirIds((prev) => {
+              const next = new Set(prev);
+              if (next.has(id)) {
+                next.delete(id);
+              } else {
+                next.add(id);
+              }
+              return next;
+            });
           }}
-          file={file}
-          setFile={setFile}
-          uploading={uploading}
-          onUpload={upload}
-          driveImporting={driveImporting}
-          gapiLoaded={gapiLoaded}
-          gisLoaded={gisLoaded}
-          onGoogleDriveImport={getGoogleAuthTokenAndOpenPicker}
+          onSelectAll={() => {
+            setSelectedDirIds((prev) => {
+              const next = new Set(prev);
+              dirCandidates.forEach((c) => {
+                if (!isAlreadyInSearch(c)) {
+                  next.add(c.id);
+                }
+              });
+              return next;
+            });
+          }}
+          onDeselectAll={() => {
+            setSelectedDirIds(new Set());
+          }}
+          onImport={handleImportFromDirectory}
+          importing={importingDir}
+          isAlreadyInSearch={isAlreadyInSearch}
         />
 
-        <JobDetailsModal
+        <SearchDetailsModal
           open={detailsOpen}
           onClose={() => setDetailsOpen(false)}
-          job={job}
+          searchCandidate={searchCandidate}
         />
 
         <EditCandidateModal
@@ -1549,10 +1299,10 @@ export default function JobClient({ jobId }: { jobId: string }) {
         <DeleteMultipleConfirmationModal
           open={deleteMultipleOpen}
           onClose={() => setDeleteMultipleOpen(false)}
-          count={selectedJobResumeIds.size}
+          count={selectedSearchResumeIds.size}
           onConfirm={async () => {
             await Promise.all(
-              Array.from(selectedJobResumeIds).map((id) =>
+              Array.from(selectedSearchResumeIds).map((id) =>
                 fetch(`/api/resumes/${id}`, {
                   method: "DELETE",
                 }).then((res) => {
@@ -1560,25 +1310,99 @@ export default function JobClient({ jobId }: { jobId: string }) {
                 })
               )
             );
-            setSelectedJobResumeIds(new Set());
+            setSelectedSearchResumeIds(new Set());
             await refreshResumes();
           }}
         />
 
-        <DeleteJobConfirmationModal
-          open={deleteJobOpen}
-          onClose={() => setDeleteJobOpen(false)}
-          jobId={jobId}
+        <DeleteSearchConfirmationModal
+          open={deleteSearchOpen}
+          onClose={() => setDeleteSearchOpen(false)}
+          id={id}
           onDeleted={() => { window.location.href = "/dashboard"; }}
         />
 
-        <JobOnboardingTourModal
+        <SearchOnboardingTourModal
           open={showTour}
           step={tourStep}
           onNext={handleNextTourStep}
           onPrev={handlePrevTourStep}
           onClose={handleCompleteTour}
         />
+
+        {/* Processing Request Popup Modal */}
+        {processingPopupOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center px-6 animate-fade-in">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setProcessingPopupOpen(false)} />
+            <div className="relative w-full max-w-lg rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-950/95 p-8 shadow-2xl backdrop-blur-md overflow-hidden text-center text-zinc-900 dark:text-zinc-100">
+              {/* background gradient element */}
+              <div className="absolute -right-24 -top-24 w-72 h-72 rounded-full bg-violet-400/10 dark:bg-violet-900/20 blur-3xl" />
+              <div className="absolute -left-24 -bottom-24 w-72 h-72 rounded-full bg-indigo-400/10 dark:bg-indigo-900/20 blur-3xl" />
+
+              {/* Close button */}
+              <button
+                onClick={() => setProcessingPopupOpen(false)}
+                className="absolute top-4 right-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900/40 px-3 py-2 text-xs hover:bg-zinc-200 dark:hover:bg-zinc-900/70 text-zinc-500 dark:text-zinc-400 transition cursor-pointer"
+              >
+                ✕
+              </button>
+
+              <div className="relative z-10 flex flex-col items-center max-w-xl mx-auto">
+                {/* Radar Pulsing scan effect */}
+                <div className="relative flex items-center justify-center w-20 h-20 mb-6">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-violet-400/20 dark:bg-violet-500/10 animate-ping" />
+                  <span className="absolute inline-flex h-14 w-14 rounded-full bg-violet-400/30 dark:bg-violet-500/20 animate-pulse" />
+                  <div className="relative rounded-2xl bg-gradient-to-tr from-violet-600 to-indigo-600 dark:from-violet-500 dark:to-indigo-500 p-3.5 shadow-lg shadow-violet-500/30">
+                    <svg className="h-7 w-7 text-white animate-spin-slow" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                    </svg>
+                  </div>
+                </div>
+
+                <h2 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-white">
+                  Processing candidates
+                </h2>
+
+                <p className="mt-3 text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
+                  We are processing your request and it will take some time. Please be patient, we will email you once we have the top candidate for you.
+                </p>
+
+                {/* Status Indicator */}
+                <div className="mt-6 w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/40 p-4 flex items-center justify-between gap-4 text-left">
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                      Status
+                    </div>
+                    <div className="mt-0.5 text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+                      Imported {rows.length} Candidate{rows.length === 1 ? "" : "s"}
+                    </div>
+                  </div>
+                  <div className="flex-1 text-right">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 dark:bg-amber-950/20 px-2.5 py-1 text-xs font-semibold text-amber-600 dark:text-amber-400">
+                      <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-ping" />
+                      Analyzing {processingCount} Resumes...
+                    </span>
+                  </div>
+                </div>
+
+                {/* Progress bar */}
+                <div className="mt-6 w-full h-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden relative">
+                  <div className="h-full bg-gradient-to-r from-violet-500 to-indigo-500 rounded-full animate-loading-bar" />
+                </div>
+
+                <div className="mt-8 flex w-full gap-3">
+                  <button
+                    onClick={() => setProcessingPopupOpen(false)}
+                    className="w-full rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-white px-5 py-3 text-sm font-semibold text-white dark:text-zinc-950 transition cursor-pointer"
+                  >
+                    View Background Progress
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         </>
         )}
       </div>
@@ -1586,7 +1410,7 @@ export default function JobClient({ jobId }: { jobId: string }) {
   );
 }
 
-function JobOnboardingTourModal(props: {
+function SearchOnboardingTourModal(props: {
   open: boolean;
   step: number;
   onNext: () => void;
@@ -1606,12 +1430,12 @@ function JobOnboardingTourModal(props: {
   const steps = [
     {
       title: "Welcome to your Campaign Workspace! 💼",
-      description: "This page shows all parsed applicants and scoring metrics for this job campaign.",
+      description: "This page shows all parsed applicants and scoring metrics for this searchCandidate campaign.",
       icon: "💼",
       gradient: "from-violet-600 to-indigo-600",
       shadow: "shadow-indigo-900/35",
       badge: "Campaign Header",
-      targetId: "tour-job-header"
+      targetId: "tour-searchCandidate-header"
     },
     {
       title: "Campaign Metrics 📊",
@@ -1620,7 +1444,7 @@ function JobOnboardingTourModal(props: {
       gradient: "from-blue-600 to-cyan-600",
       shadow: "shadow-blue-900/35",
       badge: "Real-time Stats",
-      targetId: "tour-job-metrics"
+      targetId: "tour-searchCandidate-metrics"
     },
     {
       title: "Candidate Search Filters 🔍",
@@ -1629,7 +1453,7 @@ function JobOnboardingTourModal(props: {
       gradient: "from-fuchsia-600 to-pink-600",
       shadow: "shadow-pink-900/35",
       badge: "Advanced Filters",
-      targetId: "tour-job-filters"
+      targetId: "tour-searchCandidate-filters"
     },
     {
       title: "Candidates List 👥",
@@ -1638,20 +1462,20 @@ function JobOnboardingTourModal(props: {
       gradient: "from-emerald-600 to-teal-600",
       shadow: "shadow-emerald-900/35",
       badge: "Applicant Pipeline",
-      targetId: "tour-job-table"
+      targetId: "tour-searchCandidate-table"
     },
     {
-      title: "Upload Resumes 📤",
-      description: "Add new applicants to this job by uploading PDF, DOCX, TXT files, or importing from Google Drive.",
-      icon: "📤",
+      title: "Import Candidates 👥",
+      description: "Add candidates to this campaign by selecting them from the Candidate Directory master database.",
+      icon: "👥",
       gradient: "from-amber-600 to-orange-600",
       shadow: "shadow-amber-900/35",
       badge: "Add Candidates",
-      targetId: "tour-job-upload"
+      targetId: "tour-searchCandidate-import"
     },
     {
       title: "Start Scoring Candidates! 🎉",
-      description: "You're all set. Upload resumes to begin matching and scoring candidates instantly.",
+      description: "You're all set. Import candidates to begin matching and scoring instantly.",
       icon: "⚡",
       gradient: "from-violet-600 to-indigo-600",
       shadow: "shadow-indigo-900/35",
@@ -1818,7 +1642,7 @@ function JobOnboardingTourModal(props: {
             )}
             <button
               onClick={props.onNext}
-              className="rounded-lg bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-955 hover:bg-white transition cursor-pointer"
+              className="rounded-lg bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-950 hover:bg-white transition cursor-pointer"
             >
               {props.step === 5 ? "Finish" : "Next"}
             </button>
@@ -1879,168 +1703,38 @@ function ScorePill({ score }: { score: number | null }) {
     score == null
       ? "border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-950/40 text-zinc-600 dark:text-zinc-300"
       : score >= 80
-        ? "border-emerald-200 dark:border-emerald-900/50 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-250"
+        ? "border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300"
         : score >= 60
-          ? "border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-250"
-          : "border-rose-200 dark:border-rose-900/50 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-250";
+          ? "border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300"
+          : "border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-300";
 
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${tone}`}
+      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${tone}`}
     >
       {text}
     </span>
   );
 }
 
-function UploadModal(props: {
+function SearchDetailsModal(props: {
   open: boolean;
   onClose: () => void;
-  file: File | null;
-  setFile: (f: File | null) => void;
-  uploading: boolean;
-  onUpload: (e: React.FormEvent) => Promise<void>;
-  driveImporting: boolean;
-  gapiLoaded: boolean;
-  gisLoaded: boolean;
-  onGoogleDriveImport: (mode: 'files' | 'folder') => void;
+  searchCandidate: SearchCandidate | null;
 }) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [copied, setCopied] = useState(false);
 
   if (!props.open) return null;
 
-  const filename = props.file?.name ?? "No file selected";
+  const searchCandidate = props.searchCandidate;
 
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center px-6">
-      <div className="absolute inset-0 bg-black/70" onClick={props.onClose} />
-
-      <div className="relative w-full max-w-xl rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-6 shadow-2xl text-zinc-900 dark:text-zinc-100">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="text-lg font-semibold">Upload resumes</div>
-            <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              Upload a PDF/DOCX/TXT or ZIP containing multiple resumes.
-            </div>
-          </div>
-          <button
-            onClick={props.onClose}
-            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/40 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-150 dark:hover:bg-zinc-900/70 transition-colors cursor-pointer"
-          >
-            X
-          </button>
-        </div>
-
-        <form onSubmit={props.onUpload} className="mt-5 space-y-4">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".pdf,.docx,.txt,.zip,application/pdf,application/zip"
-            onChange={(e) => props.setFile(e.target.files?.[0] ?? null)}
-            className="hidden"
-          />
-
-          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/20 p-4 shadow-sm dark:shadow-none">
-            <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">File</div>
-
-            <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-center">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="inline-flex items-center justify-center rounded-xl bg-zinc-900 dark:bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-50 dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-white transition-colors cursor-pointer"
-              >
-                Choose file
-              </button>
-
-              <div className="flex-1 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100/30 dark:bg-zinc-950/50 px-4 py-2 text-sm text-zinc-700 dark:text-zinc-300 truncate">
-                {filename}
-              </div>
-
-              {props.file && (
-                <button
-                  type="button"
-                  onClick={() => props.setFile(null)}
-                  className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-150 dark:hover:bg-zinc-900/60 transition-colors cursor-pointer"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            disabled={!props.file || props.uploading}
-            className="w-full rounded-xl bg-zinc-900 dark:bg-zinc-100 px-4 py-3 text-sm font-semibold text-zinc-50 dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-white disabled:opacity-50 transition-colors cursor-pointer"
-          >
-            {props.uploading ? "Uploading..." : "Upload"}
-          </button>
-
-          <div className="relative my-4 flex py-1 items-center">
-            <div className="flex-grow border-t border-zinc-200 dark:border-zinc-800"></div>
-            <span className="flex-shrink mx-4 text-zinc-400 dark:text-zinc-500 text-xs uppercase tracking-wider font-semibold">Or</span>
-            <div className="flex-grow border-t border-zinc-200 dark:border-zinc-800"></div>
-          </div>
-
-          {props.driveImporting ? (
-            <div className="w-full flex items-center justify-center gap-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 px-4 py-3 text-sm font-semibold text-zinc-600 dark:text-zinc-400">
-              <svg className="h-4 w-4 animate-spin text-zinc-400" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-              </svg>
-              Connecting Google Drive...
-            </div>
-          ) : (!props.gapiLoaded || !props.gisLoaded) ? (
-            <div className="w-full flex items-center justify-center gap-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 px-4 py-3 text-sm font-semibold text-zinc-550 dark:text-zinc-500">
-              Loading Google integration...
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <div className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 px-1">Import from Google Drive:</div>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => props.onGoogleDriveImport('files')}
-                  className="flex items-center justify-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 px-3 py-2.5 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-900/60 transition-colors cursor-pointer"
-                >
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M19.43 12.98L12.01 2.0199C11.83 1.7099 11.49 1.5199 11.13 1.5199C10.77 1.5199 10.43 1.7099 10.25 2.0199L2.83 12.98C2.65 13.29 2.65 13.67 2.83 13.98L6.56 20.48C6.74 20.79 7.07 20.98 7.43 20.98C7.79 20.98 8.12 20.79 8.3 20.48L15.72 9.5199C15.9 9.2099 16.24 9.0199 16.6 9.0199C16.96 9.0199 17.3 9.2099 17.48 9.5199L21.21 16.02C21.39 16.33 21.39 16.71 21.21 17.02L19.43 20.12C19.25 20.43 18.91 20.62 18.55 20.62C18.19 20.62 17.85 20.43 17.67 20.12L13.94 13.62C13.76 13.31 13.76 12.93 13.94 12.62L15.72 9.5199" fill="#FFC107"/>
-                    <path d="M10.25 2.0199L2.83 12.98C2.65 13.29 2.65 13.67 2.83 13.98L6.56 20.48C6.74 20.79 7.07 20.98 7.43 20.98H14.89L10.25 12.62L12.03 9.5199L10.25 2.0199Z" fill="#00796B"/>
-                    <path d="M12.01 2.0199L19.43 12.98C19.61 13.29 19.61 13.67 19.43 13.98L15.7 20.48C15.52 20.79 15.18 20.98 14.82 20.98H7.36L12.01 12.62L10.23 9.5199L12.01 2.0199Z" fill="#4CAF50"/>
-                  </svg>
-                  Multiple Files
-                </button>
-                <button
-                  type="button"
-                  onClick={() => props.onGoogleDriveImport('folder')}
-                  className="flex items-center justify-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 px-3 py-2.5 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-900/60 transition-colors cursor-pointer"
-                >
-                  <svg className="h-4 w-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                  </svg>
-                  Entire Folder
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="text-xs text-zinc-500">
-            Tip: Upload a ZIP to add multiple candidates at once.
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function JobDetailsModal(props: {
-  open: boolean;
-  onClose: () => void;
-  job: Job | null;
-}) {
-  if (!props.open) return null;
-
-  const job = props.job;
+  const handleCopy = () => {
+    if (searchCandidate) {
+      navigator.clipboard.writeText(searchCandidate.id);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center px-6">
@@ -2049,42 +1743,55 @@ function JobDetailsModal(props: {
       <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-6 shadow-2xl text-zinc-900 dark:text-zinc-100">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="text-lg font-semibold">Job details</div>
+            <div className="text-lg font-semibold">Search details</div>
             <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              Review the job metadata and description.
+              Review the search metadata and description.
             </div>
           </div>
           <button
             onClick={props.onClose}
-            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/40 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-150 dark:hover:bg-zinc-900/70 transition-colors cursor-pointer"
+            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/40 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900/70 transition-colors cursor-pointer"
           >
             X
           </button>
         </div>
 
-        {!job ? (
+        {!searchCandidate ? (
           <div className="mt-6 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 p-4 text-sm text-zinc-700 dark:text-zinc-300">
             Loading...
           </div>
         ) : (
           <div className="mt-6 space-y-4">
             <div className="grid gap-3 md:grid-cols-3">
-              <Info label="Title" value={job.title} />
-              <Info label="Company" value={job.company ?? "-"} />
-              <Info label="Location" value={job.location ?? "-"} />
+              <Info label="Title" value={searchCandidate.title} />
+              <Info label="Company" value={searchCandidate.company ?? "-"} />
+              <Info label="Location" value={searchCandidate.location ?? "-"} />
+            </div>
+
+            <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/20 p-4 shadow-sm dark:shadow-none flex items-center justify-between gap-4">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">Campaign ID</div>
+                <div className="mt-1.5 text-xs font-mono text-zinc-800 dark:text-zinc-200 select-all truncate">{searchCandidate.id}</div>
+              </div>
+              <button
+                onClick={handleCopy}
+                className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800 transition cursor-pointer flex-shrink-0"
+              >
+                {copied ? "Copied!" : "Copy ID"}
+              </button>
             </div>
 
             <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/20 p-4 shadow-sm dark:shadow-none">
               <div className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
                 Description
               </div>
-              <div className="mt-2 whitespace-pre-wrap text-sm text-zinc-750 dark:text-zinc-300 leading-relaxed">
-                {job.description}
+              <div className="mt-2 whitespace-pre-wrap text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
+                {searchCandidate.description}
               </div>
             </div>
 
             <div className="text-xs text-zinc-500">
-              Created: {new Date(job.created_at).toLocaleString()}
+              Created: {new Date(searchCandidate.created_at).toLocaleString()}
             </div>
           </div>
         )}
@@ -2159,7 +1866,7 @@ function EditCandidateModal({
           <div className="text-lg font-semibold">Edit Candidate</div>
           <button
             onClick={onClose}
-            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/40 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-150 dark:hover:bg-zinc-900/70 transition-colors cursor-pointer"
+            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/40 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900/70 transition-colors cursor-pointer"
           >
             X
           </button>
@@ -2218,7 +1925,7 @@ function EditCandidateModal({
                 name="visa_status"
                 value={formData.visa_status || ""}
                 onChange={handleChange}
-                className="w-full mt-1 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-850 text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
+                className="w-full mt-1 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
               >
                 <option value="">Unknown</option>
                 <option value="citizen">Citizen</option>
@@ -2325,15 +2032,15 @@ function DeleteConfirmationModal({
   );
 }
 
-function DeleteJobConfirmationModal({
+function DeleteSearchConfirmationModal({
   open,
   onClose,
-  jobId,
+  id,
   onDeleted,
 }: {
   open: boolean;
   onClose: () => void;
-  jobId: string;
+  id: string;
   onDeleted: () => void;
 }) {
   const [deleting, setDeleting] = useState(false);
@@ -2343,16 +2050,16 @@ function DeleteJobConfirmationModal({
   async function handleConfirm() {
     setDeleting(true);
     try {
-      const res = await fetch(`/api/jobs/${jobId}`, {
+      const res = await fetch(`/api/search-candidate/${id}`, {
         method: "DELETE",
       });
-      if (!res.ok) throw new Error("Failed to delete job");
+      if (!res.ok) throw new Error("Failed to delete searchCandidate");
 
       // Redirect to dashboard
       onDeleted();
     } catch (error) {
       console.error(error);
-      alert("Failed to delete job");
+      alert("Failed to delete searchCandidate");
     } finally {
       setDeleting(false);
     }
@@ -2362,9 +2069,9 @@ function DeleteJobConfirmationModal({
     <div className="fixed inset-0 z-[70] flex items-center justify-center px-6">
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
       <div className="relative w-full max-w-md rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-6 shadow-2xl text-zinc-900 dark:text-zinc-100">
-        <div className="text-lg font-semibold text-red-500 dark:text-red-400">Delete Job?</div>
+        <div className="text-lg font-semibold text-red-500 dark:text-red-400">Delete Search campaign?</div>
         <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-          Are you sure you want to delete this job and{" "}
+          Are you sure you want to delete this searchCandidate and{" "}
           <strong className="text-zinc-800 dark:text-zinc-200">ALL candidates</strong>? This action cannot be undone.
         </div>
         <div className="mt-5 flex justify-end gap-3">
@@ -2379,7 +2086,7 @@ function DeleteJobConfirmationModal({
             disabled={deleting}
             className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-60 cursor-pointer"
           >
-            {deleting ? "Deleting..." : "Delete Job"}
+            {deleting ? "Deleting..." : "Delete Search Campaign"}
           </button>
         </div>
       </div>
@@ -2422,7 +2129,7 @@ function DeleteMultipleConfirmationModal({
         <div className="text-lg font-semibold text-red-500 dark:text-red-400">
           Delete {count} Candidates?
         </div>
-        <div className="mt-2 text-sm text-zinc-550 dark:text-zinc-400">
+        <div className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
           Are you sure you want to delete the <strong className="text-zinc-800 dark:text-zinc-200">{count}</strong> selected candidates? This action cannot be undone.
         </div>
         <div className="mt-5 flex justify-end gap-3">
@@ -2438,6 +2145,247 @@ function DeleteMultipleConfirmationModal({
             className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-60"
           >
             {deleting ? "Deleting..." : "Delete Candidates"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ImportFromDirectoryModal({
+  open,
+  onClose,
+  candidates,
+  loading,
+  page,
+  totalPages,
+  totalCount,
+  onPageChange,
+  searchQuery,
+  onSearchChange,
+  selectedIds,
+  onToggleSelect,
+  onSelectAll,
+  onDeselectAll,
+  onImport,
+  importing,
+  isAlreadyInSearch,
+}: {
+  open: boolean;
+  onClose: () => void;
+  candidates: any[];
+  loading: boolean;
+  page: number;
+  totalPages: number;
+  totalCount: number;
+  onPageChange: (p: number) => void;
+  searchQuery: string;
+  onSearchChange: (s: string) => void;
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
+  onSelectAll: () => void;
+  onDeselectAll: () => void;
+  onImport: () => Promise<void>;
+  importing: boolean;
+  isAlreadyInSearch: (c: any) => boolean;
+}) {
+  if (!open) return null;
+
+  // Filter candidates locally by search query
+  const filtered = candidates.filter((c) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    const nameMatch = c.full_name?.toLowerCase().includes(q) ?? false;
+    const emailMatch = c.email?.toLowerCase().includes(q) ?? false;
+    const skillsMatch = c.parsed_json?.skills?.some((s: string) => s.toLowerCase().includes(q)) ?? false;
+    return nameMatch || emailMatch || skillsMatch;
+  });
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center px-6">
+      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
+      <div className="relative w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 shadow-2xl text-zinc-900 dark:text-zinc-100 overflow-hidden">
+        {/* Header */}
+        <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-bold">Import from Candidate Directory ({totalCount})</h2>
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+              Select candidates from your master database to add to this searchCandidate campaign.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/40 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900/70 transition-colors cursor-pointer"
+          >
+            X
+          </button>
+        </div>
+
+        {/* Content Area */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-4 max-h-[50vh]">
+          {/* Search Bar */}
+          <div className="flex items-center gap-3">
+            <input
+              type="text"
+              placeholder="Search by name, email, or skills..."
+              value={searchQuery}
+              onChange={(e) => onSearchChange(e.target.value)}
+              className="flex-1 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3 py-2 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => onSearchChange("")}
+                className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300 cursor-pointer"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+          {/* Action Row */}
+          {filtered.length > 0 && (
+            <div className="flex items-center justify-between text-xs text-zinc-500 border-b border-zinc-100 dark:border-zinc-850 pb-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onSelectAll}
+                  className="font-semibold text-violet-600 dark:text-violet-400 hover:underline cursor-pointer"
+                >
+                  Select All on Page
+                </button>
+                <span>•</span>
+                <button
+                  type="button"
+                  onClick={onDeselectAll}
+                  className="font-semibold text-zinc-500 dark:text-zinc-400 hover:underline cursor-pointer"
+                >
+                  Deselect All
+                </button>
+              </div>
+              <div>
+                {selectedIds.size} selected
+              </div>
+            </div>
+          )}
+
+          {/* Candidates List */}
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-12">
+              <svg className="h-6 w-6 animate-spin text-zinc-400" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+              <span className="mt-2 text-xs text-zinc-500">Loading master database...</span>
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="text-center py-12 text-sm text-zinc-500 dark:text-zinc-450">
+              No candidates found matching your criteria.
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {filtered.map((c) => {
+                const inSearch = isAlreadyInSearch(c);
+                const isSelected = selectedIds.has(c.id);
+
+                return (
+                  <div
+                    key={c.id}
+                    className={`flex items-start gap-3 p-3 rounded-xl border transition ${
+                      inSearch
+                        ? "border-zinc-100 dark:border-zinc-900 bg-zinc-50/40 dark:bg-zinc-950/20 opacity-60"
+                        : isSelected
+                        ? "border-violet-300 dark:border-violet-850 bg-violet-50/10 dark:bg-violet-950/5"
+                        : "border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900/20"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      disabled={inSearch}
+                      checked={isSelected || inSearch}
+                      onChange={() => {
+                        if (!inSearch) onToggleSelect(c.id);
+                      }}
+                      className="mt-1 h-4 w-4 rounded border-zinc-300 dark:border-zinc-850 text-violet-600 focus:ring-violet-500 cursor-pointer disabled:cursor-not-allowed"
+                    />
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <h4 className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 truncate">
+                            {c.full_name ?? "Unknown candidate"}
+                          </h4>
+                          <p className="text-[11px] text-zinc-400 dark:text-zinc-500 truncate mt-0.5">
+                            {c.original_filename}
+                          </p>
+                        </div>
+                        {inSearch && (
+                          <span className="rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-500 dark:text-zinc-400">
+                            Already in Campaign
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Small metadata block */}
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+                        {c.email && <span className="truncate max-w-[150px]">{c.email}</span>}
+                        {c.parsed_json?.years_experience != null && (
+                          <span className="px-1 bg-zinc-100 dark:bg-zinc-800 rounded">{c.parsed_json.years_experience}y exp</span>
+                        )}
+                        {c.parsed_json?.skills?.slice(0, 3).map((s: string, idx: number) => (
+                          <span key={idx} className="px-1 bg-zinc-100 dark:bg-zinc-800 rounded truncate max-w-[80px]">
+                            {s}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Pagination Footer */}
+        {totalPages > 1 && (
+          <div className="px-6 py-3 border-t border-zinc-100 dark:border-zinc-850 flex items-center justify-between text-xs text-zinc-500">
+            <button
+              type="button"
+              disabled={page === 1}
+              onClick={() => onPageChange(page - 1)}
+              className="px-2.5 py-1.5 rounded border border-zinc-200 dark:border-zinc-800 font-semibold hover:bg-zinc-50 dark:hover:bg-zinc-900/40 disabled:opacity-40 cursor-pointer"
+            >
+              Previous
+            </button>
+            <span>
+              Showing {candidates.length} of {totalCount} candidates • Page {page} of {totalPages}
+            </span>
+            <button
+              type="button"
+              disabled={page === totalPages}
+              onClick={() => onPageChange(page + 1)}
+              className="px-2.5 py-1.5 rounded border border-zinc-200 dark:border-zinc-800 font-semibold hover:bg-zinc-50 dark:hover:bg-zinc-900/40 disabled:opacity-40 cursor-pointer"
+            >
+              Next
+            </button>
+          </div>
+        )}
+
+        {/* Footer actions */}
+        <div className="p-6 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-3 bg-zinc-50 dark:bg-zinc-900/10">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl border border-zinc-200 dark:border-zinc-800 px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={selectedIds.size === 0 || importing}
+            onClick={onImport}
+            className="rounded-xl bg-zinc-900 dark:bg-zinc-100 px-4 py-2 text-xs font-semibold text-zinc-50 dark:text-zinc-950 disabled:opacity-50 hover:bg-zinc-800 dark:hover:bg-white transition-colors cursor-pointer"
+          >
+            {importing ? "Importing..." : `Import Selected (${selectedIds.size})`}
           </button>
         </div>
       </div>

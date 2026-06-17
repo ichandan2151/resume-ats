@@ -226,10 +226,10 @@ export async function processResumeBackground(
   } finally {
     if (jobId) {
       try {
-        const { checkAndSendJobNotification } = await import("@/lib/mail");
-        await checkAndSendJobNotification(supabaseAdmin, userId, jobId);
+        const { checkAndSendSearchNotification } = await import("@/lib/mail");
+        await checkAndSendSearchNotification(supabaseAdmin, userId, jobId);
       } catch (mailErr) {
-        console.error("Failed to trigger job completion email notification:", mailErr);
+        console.error("Failed to trigger search criteria completion email notification:", mailErr);
       }
     }
   }
@@ -245,7 +245,7 @@ export async function POST(req: Request) {
     const form = await req.formData();
     const file = form.get("file") as File | null;
 
-    const jobIdRaw = form.get("jobId");
+    const jobIdRaw = form.get("id") || form.get("jobId");
     const jobId = typeof jobIdRaw === "string" && jobIdRaw.trim() ? jobIdRaw.trim() : null;
 
     if (!file)

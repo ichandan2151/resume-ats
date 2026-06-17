@@ -152,10 +152,10 @@ async function retryInBackground(
   } finally {
     if (jobId) {
       try {
-        const { checkAndSendJobNotification } = await import("@/lib/mail");
-        await checkAndSendJobNotification(supabaseAdmin, userId, jobId);
+        const { checkAndSendSearchNotification } = await import("@/lib/mail");
+        await checkAndSendSearchNotification(supabaseAdmin, userId, jobId);
       } catch (mailErr) {
-        console.error("Failed to trigger job completion email notification:", mailErr);
+        console.error("Failed to trigger search criteria completion email notification:", mailErr);
       }
     }
   }

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import CandidateDirectory from "./CandidateDirectory";
 
-type Job = {
+type SearchCampaign = {
   id: string;
   title: string;
   company: string | null;
@@ -20,19 +20,19 @@ type Job = {
 export default function DashboardPage() {
   const supabase = createSupabaseBrowserClient();
 
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [loadingJobs, setLoadingJobs] = useState(true);
-  const [activeTab, setActiveTab] = useState<"jobs" | "candidates" | "profile">("jobs");
+  const [searchCampaigns, setSearchCampaigns] = useState<SearchCampaign[]>([]);
+  const [loadingCampaigns, setLoadingCampaigns] = useState(true);
+  const [activeTab, setActiveTab] = useState<"searchCampaigns" | "candidates" | "profile">("searchCampaigns");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tab = params.get("tab");
-    if (tab === "candidates" || tab === "profile" || tab === "jobs") {
+    if (tab === "candidates" || tab === "profile" || tab === "searchCampaigns") {
       setActiveTab(tab as any);
     }
   }, []);
 
-  const handleTabChange = (tab: "jobs" | "candidates" | "profile") => {
+  const handleTabChange = (tab: "searchCampaigns" | "candidates" | "profile") => {
     setActiveTab(tab);
     const url = new URL(window.location.href);
     url.searchParams.set("tab", tab);
@@ -43,11 +43,11 @@ export default function DashboardPage() {
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // delete job modal state
-  const [deleteJobId, setDeleteJobId] = useState<string | null>(null);
-  const [deleteJobTitle, setDeleteJobTitle] = useState<string>("");
-  const [deleteJobOpen, setDeleteJobOpen] = useState(false);
-  const [deletingJob, setDeletingJob] = useState(false);
+  // delete campaign modal state
+  const [deleteCampaignId, setDeleteCampaignId] = useState<string | null>(null);
+  const [deleteCampaignTitle, setDeleteCampaignTitle] = useState<string>("");
+  const [deleteCampaignOpen, setDeleteCampaignOpen] = useState(false);
+  const [deletingCampaign, setDeletingCampaign] = useState(false);
 
   // Onboarding Tour state
   const [showTour, setShowTour] = useState(false);
@@ -63,8 +63,8 @@ export default function DashboardPage() {
     if (open) {
       return [
         {
-          title: "Define Job Title 🏷️",
-          description: "Enter the job title you are targeting (e.g., 'Senior Frontend Engineer').",
+          title: "Define SearchCampaign Title 🏷️",
+          description: "Enter the search title you are targeting (e.g., 'Senior Frontend Engineer').",
           icon: "🏷️",
           gradient: "from-violet-600 to-indigo-600",
           shadow: "shadow-indigo-900/35",
@@ -72,8 +72,8 @@ export default function DashboardPage() {
           targetId: "tour-modal-title"
         },
         {
-          title: "Job Requirements 📝",
-          description: "Paste the job description. The AI parses candidate resumes against these exact requirements to score them.",
+          title: "SearchCampaign Requirements 📝",
+          description: "Paste the search description. The AI parses candidate resumes against these exact requirements to score them.",
           icon: "📝",
           gradient: "from-fuchsia-600 to-pink-600",
           shadow: "shadow-pink-900/35",
@@ -104,7 +104,7 @@ export default function DashboardPage() {
       },
       {
         title: "Toggle Workspace Tabs ↔️",
-        description: "Easily switch between the 'Jobs' dashboard (managing candidate databases) and the 'Profile' configurations.",
+        description: "Easily switch between the 'Search Candidates' dashboard (managing candidate databases) and the 'Profile' configurations.",
         icon: "🧭",
         gradient: "from-fuchsia-600 to-pink-600",
         shadow: "shadow-pink-900/35",
@@ -112,22 +112,22 @@ export default function DashboardPage() {
         targetId: "tour-nav-tabs"
       },
       {
-        title: "Start a Hiring Campaign 📋",
-        description: "Click '+ Search Candidate' to define a job description. The AI parses applicant files against these requirements to score them.",
+        title: "Start a Search Campaign 📋",
+        description: "Click '+ Search Candidate' to define a search description. The AI parses applicant files against these requirements to score them.",
         icon: "💼",
         gradient: "from-blue-600 to-cyan-600",
         shadow: "shadow-blue-900/35",
         badge: "Campaign Creation",
-        targetId: "tour-create-job"
+        targetId: "tour-create-campaign"
       },
       {
-        title: "Active Campaigns Grid 📂",
+        title: "Active Search Campaigns Grid 📂",
         description: "All your active hiring campaigns appear here. You can see candidate counts, average scores, and creation dates at a glance. Click any card to enter the workspace.",
         icon: "📁",
         gradient: "from-emerald-600 to-teal-600",
         shadow: "shadow-emerald-900/35",
         badge: "Database List",
-        targetId: "tour-jobs-list"
+        targetId: "tour-searchCampaigns-list"
       },
       {
         title: "You're Ready to Hire! 🎉",
@@ -183,20 +183,20 @@ export default function DashboardPage() {
   const canCreate =
     title.trim().length > 0 && description.trim().length > 0 && !creating;
 
-  async function loadJobs() {
-    setLoadingJobs(true);
+  async function loadSearchCampaigns() {
+    setLoadingCampaigns(true);
     try {
-      const res = await fetch("/api/jobs");
+      const res = await fetch("/api/search-candidate");
       const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? "Failed to load jobs");
-      setJobs(json.data ?? []);
+      if (!res.ok) throw new Error(json?.error ?? "Failed to load search campaigns");
+      setSearchCampaigns(json.data ?? []);
     } finally {
-      setLoadingJobs(false);
+      setLoadingCampaigns(false);
     }
   }
 
   useEffect(() => {
-    loadJobs().catch((e) => setErr(e.message));
+    loadSearchCampaigns().catch((e) => setErr(e.message));
   }, []);
 
   async function logout() {
@@ -204,13 +204,13 @@ export default function DashboardPage() {
     window.location.href = "/login";
   }
 
-  async function createJob() {
+  async function createSearchCampaign() {
     setErr(null);
     if (!title.trim()) return;
 
     setCreating(true);
     try {
-      const res = await fetch("/api/jobs", {
+      const res = await fetch("/api/search-candidate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -221,7 +221,7 @@ export default function DashboardPage() {
         }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? "Failed to create job");
+      if (!res.ok) throw new Error(json?.error ?? "Failed to create campaign");
 
       // reset + refresh
       setTitle("");
@@ -232,9 +232,9 @@ export default function DashboardPage() {
 
       if (json.data?.id) {
         localStorage.setItem("patternix_onboarding_completed", "true");
-        window.location.href = `/jobs/${json.data.id}`;
+        window.location.href = `/search-candidate/${json.data.id}`;
       } else {
-        await loadJobs();
+        await loadSearchCampaigns();
       }
     } catch (e: any) {
       setErr(e.message ?? "Error");
@@ -243,24 +243,24 @@ export default function DashboardPage() {
     }
   }
 
-  async function handleDeleteJob() {
-    if (!deleteJobId) return;
-    setDeletingJob(true);
+  async function handleDeleteSearchCampaign() {
+    if (!deleteCampaignId) return;
+    setDeletingCampaign(true);
     setErr(null);
     try {
-      const res = await fetch(`/api/jobs/${deleteJobId}`, {
+      const res = await fetch(`/api/search-candidate/${deleteCampaignId}`, {
         method: "DELETE",
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? "Failed to delete job");
-      setDeleteJobOpen(false);
-      setDeleteJobId(null);
-      setDeleteJobTitle("");
-      await loadJobs();
+      if (!res.ok) throw new Error(json?.error ?? "Failed to delete campaign");
+      setDeleteCampaignOpen(false);
+      setDeleteCampaignId(null);
+      setDeleteCampaignTitle("");
+      await loadSearchCampaigns();
     } catch (e: any) {
       setErr(e.message ?? "Delete failed");
     } finally {
-      setDeletingJob(false);
+      setDeletingCampaign(false);
     }
   }
 
@@ -268,11 +268,11 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 transition-colors duration-300">
       <NavBar
         active={activeTab}
-        onJobs={() => handleTabChange("jobs")}
+        onCampaigns={() => handleTabChange("searchCampaigns")}
         onCandidates={() => handleTabChange("candidates")}
         onProfile={() => handleTabChange("profile")}
         onLogout={logout}
-        onCreateJob={() => {
+        onCreateCampaign={() => {
           setOpen(true);
           if (showTour) {
             setTourStep(0);
@@ -281,17 +281,18 @@ export default function DashboardPage() {
       />
 
       <div className="mx-auto max-w-6xl px-6 py-10">
-        {activeTab === "jobs" ? (
+        {activeTab === "searchCampaigns" ? (
           <>
             <div className="flex items-end justify-between gap-4">
               <div>
-                <h1 className="text-2xl font-semibold">Jobs</h1>
+                <h1 className="text-2xl font-semibold">Search Candidates</h1>
                 <p className="mt-1 text-sm text-zinc-400">
-                  Search candidates and manage candidates per job.
+                  Search candidates and manage campaigns.
                 </p>
               </div>
 
               <button
+                id="tour-create-campaign"
                 onClick={() => {
                   setOpen(true);
                   if (showTour) {
@@ -310,16 +311,16 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {loadingJobs ? (
+            {loadingCampaigns ? (
               <div className="mt-6 grid gap-4 md:grid-cols-2">
                 {[1, 2, 3, 4].map((n) => (
                   <div
                     key={n}
-                    className="rounded-2xl border border-zinc-200 dark:border-zinc-850 bg-white dark:bg-zinc-900/20 p-5 shadow-sm dark:shadow-none relative"
+                    className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/20 p-5 shadow-sm dark:shadow-none relative"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1">
-                        <div className="h-5 w-2/3 rounded-lg bg-zinc-250 dark:bg-zinc-800 animate-pulse" />
+                        <div className="h-5 w-2/3 rounded-lg bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
                         <div className="mt-2 h-3.5 w-1/2 rounded bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
                       </div>
                       <div className="h-6 w-24 rounded-full bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
@@ -329,25 +330,25 @@ export default function DashboardPage() {
                       <div className="h-3.5 w-5/6 rounded bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
                     </div>
                     <div className="mt-5 grid grid-cols-3 gap-3">
-                      <div className="h-12 rounded-xl bg-zinc-150 dark:bg-zinc-900/50 animate-pulse" />
-                      <div className="h-12 rounded-xl bg-zinc-150 dark:bg-zinc-900/50 animate-pulse" />
-                      <div className="h-12 rounded-xl bg-zinc-150 dark:bg-zinc-900/50 animate-pulse" />
+                      <div className="h-12 rounded-xl bg-zinc-100 dark:bg-zinc-900/50 animate-pulse" />
+                      <div className="h-12 rounded-xl bg-zinc-100 dark:bg-zinc-900/50 animate-pulse" />
+                      <div className="h-12 rounded-xl bg-zinc-100 dark:bg-zinc-900/50 animate-pulse" />
                     </div>
-                    <div className="mt-4 h-3 w-40 rounded bg-zinc-150 dark:bg-zinc-800 animate-pulse" />
+                    <div className="mt-4 h-3 w-40 rounded bg-zinc-100 dark:bg-zinc-800 animate-pulse" />
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="mt-6 grid gap-4 md:grid-cols-2" id="tour-jobs-list">
-                {jobs.map((j) => (
+              <div className="mt-6 grid gap-4 md:grid-cols-2" id="tour-searchCampaigns-list">
+                {searchCampaigns.map((j) => (
                   <a
                     key={j.id}
-                    href={`/jobs/${j.id}`}
+                    href={`/search-candidate/${j.id}`}
                     className="group rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/30 p-5 hover:bg-zinc-50 dark:hover:bg-zinc-900/45 transition shadow-sm dark:shadow-none relative"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="text-lg font-semibold text-zinc-850 dark:text-zinc-200 group-hover:text-zinc-950 dark:group-hover:text-white pr-8">
+                        <div className="text-lg font-semibold text-zinc-800 dark:text-zinc-200 group-hover:text-zinc-950 dark:group-hover:text-white pr-8">
                           {j.title}
                         </div>
                         <div className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
@@ -362,12 +363,12 @@ export default function DashboardPage() {
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            setDeleteJobId(j.id);
-                            setDeleteJobTitle(j.title);
-                            setDeleteJobOpen(true);
+                            setDeleteCampaignId(j.id);
+                            setDeleteCampaignTitle(j.title);
+                            setDeleteCampaignOpen(true);
                           }}
                           className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100/40 dark:bg-zinc-900/40 p-2 text-zinc-600 hover:text-red-500 dark:text-zinc-400 dark:hover:text-red-400 hover:bg-red-50/50 dark:hover:bg-red-950/20 transition cursor-pointer"
-                          title="Delete Job"
+                          title="Delete SearchCampaign"
                         >
                           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -403,9 +404,9 @@ export default function DashboardPage() {
                   </a>
                 ))}
 
-                {jobs.length === 0 && (
+                {searchCampaigns.length === 0 && (
                   <div className="rounded-2xl border border-zinc-800 border-dashed bg-transparent p-8 text-zinc-400">
-                    No jobs yet. Click{" "}
+                    No searchCampaigns yet. Click{" "}
                     <span className="text-zinc-200">Search Candidate</span> to get
                     started.
                   </div>
@@ -417,14 +418,14 @@ export default function DashboardPage() {
           <CandidateDirectory />
         ) : (
           <ProfileCard onStartTour={() => {
-            handleTabChange("jobs");
+            handleTabChange("searchCampaigns");
             setTourStep(0);
             setShowTour(true);
           }} />
         )}
       </div>
 
-      <CreateJobModal
+      <CreateSearchCampaignModal
         open={open}
         onClose={() => {
           setOpen(false);
@@ -442,7 +443,7 @@ export default function DashboardPage() {
         setDescription={setDescription}
         creating={creating}
         canCreate={canCreate}
-        onCreate={createJob}
+        onCreate={createSearchCampaign}
       />
 
       <OnboardingTourModal
@@ -455,24 +456,24 @@ export default function DashboardPage() {
         onClose={handleCompleteTour}
       />
 
-      <DeleteJobModal
-        open={deleteJobOpen}
-        onClose={() => setDeleteJobOpen(false)}
-        jobTitle={deleteJobTitle}
-        onConfirm={handleDeleteJob}
-        deleting={deletingJob}
+      <DeleteSearchCampaignModal
+        open={deleteCampaignOpen}
+        onClose={() => setDeleteCampaignOpen(false)}
+        campaignTitle={deleteCampaignTitle}
+        onConfirm={handleDeleteSearchCampaign}
+        deleting={deletingCampaign}
       />
     </div>
   );
 }
 
 function NavBar(props: {
-  active: "jobs" | "candidates" | "profile";
-  onJobs: () => void;
+  active: "searchCampaigns" | "candidates" | "profile";
+  onCampaigns: () => void;
   onCandidates: () => void;
   onProfile: () => void;
   onLogout: () => void;
-  onCreateJob: () => void;
+  onCreateCampaign: () => void;
 }) {
   return (
     <div className="sticky top-0 z-50 border-b border-zinc-200 dark:border-zinc-900 bg-white/70 dark:bg-zinc-950/70 backdrop-blur transition-colors duration-300">
@@ -484,19 +485,14 @@ function NavBar(props: {
 
           <div className="hidden items-center gap-2 md:flex" id="tour-nav-tabs">
             <NavItem
-              active={props.active === "jobs"}
-              onClick={props.onJobs}
-              label="Jobs"
+              active={props.active === "searchCampaigns"}
+              onClick={props.onCampaigns}
+              label="Search Candidates"
             />
             <NavItem
               active={props.active === "candidates"}
               onClick={props.onCandidates}
               label="Candidate Directory"
-            />
-            <NavItem
-              active={props.active === "profile"}
-              onClick={props.onProfile}
-              label="Profile"
             />
           </div>
         </div>
@@ -505,16 +501,20 @@ function NavBar(props: {
           <ThemeToggle />
 
           <button
-            onClick={props.onCreateJob}
-            id="tour-create-job"
-            className="rounded-xl bg-zinc-900 dark:bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-50 dark:text-zinc-950 hover:bg-zinc-800 dark:hover:bg-white transition"
+            onClick={props.onProfile}
+            className={[
+              "rounded-xl px-4 py-2 text-sm font-semibold transition cursor-pointer",
+              props.active === "profile"
+                ? "bg-zinc-900 dark:bg-zinc-100 text-zinc-50 dark:text-zinc-950 border border-transparent"
+                : "border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900/30 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-900/60",
+            ].join(" ")}
           >
-            + Search Candidate
+            Profile
           </button>
 
           <button
             onClick={props.onLogout}
-            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900/30 px-4 py-2 text-sm font-semibold text-zinc-800 dark:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-900/60 transition"
+            className="rounded-xl border border-red-200 dark:border-red-900/30 bg-red-50/50 dark:bg-red-950/10 px-4 py-2 text-sm font-semibold text-red-600 dark:text-red-400 hover:bg-red-100/60 dark:hover:bg-red-950/30 transition cursor-pointer"
           >
             Logout
           </button>
@@ -524,9 +524,9 @@ function NavBar(props: {
       {/* Mobile tabs */}
       <div className="mx-auto flex max-w-6xl gap-2 px-6 pb-3 md:hidden">
         <NavItem
-          active={props.active === "jobs"}
-          onClick={props.onJobs}
-          label="Jobs"
+          active={props.active === "searchCampaigns"}
+          onClick={props.onCampaigns}
+          label="Search Candidates"
         />
         <NavItem
           active={props.active === "candidates"}
@@ -576,16 +576,16 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function DeleteJobModal({
+function DeleteSearchCampaignModal({
   open,
   onClose,
-  jobTitle,
+  campaignTitle,
   onConfirm,
   deleting,
 }: {
   open: boolean;
   onClose: () => void;
-  jobTitle: string;
+  campaignTitle: string;
   onConfirm: () => void;
   deleting: boolean;
 }) {
@@ -595,9 +595,9 @@ function DeleteJobModal({
     <div className="fixed inset-0 z-[70] flex items-center justify-center px-6">
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
       <div className="relative w-full max-w-md rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-6 shadow-2xl text-zinc-900 dark:text-zinc-100">
-        <div className="text-lg font-semibold text-red-500 dark:text-red-400">Delete Job?</div>
+        <div className="text-lg font-semibold text-red-500 dark:text-red-400">Delete SearchCampaign?</div>
         <div className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-          Are you sure you want to delete <strong className="text-zinc-800 dark:text-zinc-200">{jobTitle}</strong>? Candidates from this job will remain available in the Candidate Directory.
+          Are you sure you want to delete <strong className="text-zinc-800 dark:text-zinc-200">{campaignTitle}</strong>? Candidates from this campaign will remain available in the Candidate Directory.
         </div>
         <div className="mt-5 flex justify-end gap-3">
           <button
@@ -611,7 +611,7 @@ function DeleteJobModal({
             disabled={deleting}
             className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-60"
           >
-            {deleting ? "Deleting..." : "Delete Job"}
+            {deleting ? "Deleting..." : "Delete SearchCampaign"}
           </button>
         </div>
       </div>
@@ -619,7 +619,7 @@ function DeleteJobModal({
   );
 }
 
-function CreateJobModal(props: {
+function CreateSearchCampaignModal(props: {
   open: boolean;
   onClose: () => void;
   title: string;
@@ -660,7 +660,7 @@ function CreateJobModal(props: {
             id="tour-modal-title"
             value={props.title}
             onChange={(e) => props.setTitle(e.target.value)}
-            placeholder="Job title (required)"
+            placeholder="SearchCampaign title (required)"
             className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 px-4 py-3 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600"
           />
           <div className="grid gap-3 md:grid-cols-2">
@@ -682,7 +682,7 @@ function CreateJobModal(props: {
             value={props.description}
             onChange={(e) => props.setDescription(e.target.value)}
             rows={5}
-            placeholder="Job description (required)"
+            placeholder="SearchCampaign description (required)"
             className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 px-4 py-3 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600"
           />
         </div>
@@ -703,7 +703,7 @@ function CreateJobModal(props: {
 function ProfileCard(props: { onStartTour: () => void }) {
   const [profile, setProfile] = useState<{
     email: string;
-    jobCount: number;
+    campaignCount: number;
     resumeCount: number;
     totalResumes: number;
     directoryOnlyCount: number;
@@ -953,7 +953,7 @@ function ProfileCard(props: { onStartTour: () => void }) {
                       type="button"
                       onClick={() => setAvatarUrlDraft(presetUrl)}
                       className={`h-9 w-9 rounded-xl overflow-hidden border-2 transition-all hover:scale-105 cursor-pointer ${
-                        avatarUrlDraft === presetUrl ? 'border-violet-500 scale-105 shadow-md' : 'border-zinc-250 dark:border-zinc-800'
+                        avatarUrlDraft === presetUrl ? 'border-violet-500 scale-105 shadow-md' : 'border-zinc-200 dark:border-zinc-800'
                       }`}
                     >
                       <img src={presetUrl} alt="Preset" className="h-full w-full object-cover" />
@@ -1006,8 +1006,8 @@ function ProfileCard(props: { onStartTour: () => void }) {
       {/* Statistics and Usage Grid */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/20 p-5 shadow-sm dark:shadow-none transition-all hover:scale-[1.01]">
-          <div className="text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Active Jobs</div>
-          <div className="mt-2 text-3xl font-bold text-zinc-900 dark:text-white">{profile.jobCount}</div>
+          <div className="text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Active Campaigns</div>
+          <div className="mt-2 text-3xl font-bold text-zinc-900 dark:text-white">{profile.campaignCount}</div>
           <div className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">Active campaigns</div>
         </div>
         

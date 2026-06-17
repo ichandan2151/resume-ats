@@ -48,7 +48,7 @@ export async function GET() {
   // Fetch all resumes owned by the user to calculate candidate directory stats
   const { data: allResumes, error: resumesErr } = await supabase
     .from("resumes")
-    .select("id, email, job_id")
+    .select("id, email, job_id, storage_path, original_filename")
     .eq("owner_id", auth.user.id);
 
   if (resumesErr) {
@@ -58,15 +58,31 @@ export async function GET() {
   const totalResumes = allResumes?.length ?? 0;
   const directoryOnlyCount = allResumes?.filter((r) => !r.job_id).length ?? 0;
 
-  // Deduplicate by email in memory to find unique candidates (similar logic to /api/resumes/route.ts)
+  // Deduplicate by email, storage_path, or original_filename in memory to find unique candidates
   const seenEmails = new Set<string>();
+  const seenStoragePaths = new Set<string>();
+  const seenFilenames = new Set<string>();
   let uniqueCandidatesCount = 0;
 
   for (const resume of (allResumes || [])) {
     const email = resume.email?.trim().toLowerCase();
+    const storagePath = resume.storage_path;
+    const filename = resume.original_filename;
+
     if (email) {
       if (!seenEmails.has(email)) {
         seenEmails.add(email);
+        if (storagePath) seenStoragePaths.add(storagePath);
+        uniqueCandidatesCount++;
+      }
+    } else if (storagePath) {
+      if (!seenStoragePaths.has(storagePath)) {
+        seenStoragePaths.add(storagePath);
+        uniqueCandidatesCount++;
+      }
+    } else if (filename) {
+      if (!seenFilenames.has(filename)) {
+        seenFilenames.add(filename);
         uniqueCandidatesCount++;
       }
     } else {
@@ -106,7 +122,7 @@ export async function GET() {
 
   return NextResponse.json({
     email: auth.user.email,
-    jobCount: jobCount ?? 0,
+    campaignCount: jobCount ?? 0,
     resumeCount,
     totalResumes,
     directoryOnlyCount,
