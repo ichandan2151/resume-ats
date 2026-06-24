@@ -255,23 +255,18 @@ export async function POST(req: Request) {
           if (res.ok) {
             uploaded.push(res);
 
-            // Fire and forget parsing with staggered delay (10 seconds per file)
-            // using after() so the serverless function executes it post-response.
-            const delayOffset = uploaded.length * 10000;
-
+            // Fire and forget parsing immediately post-response using after()
             after(() => {
-              sleep(delayOffset).then(() => {
-                processResumeBackground(
-                  auth.user.id,
-                  jobId,
-                  res.id,
-                  entryName,
-                  undefined,
-                  entryBytes,
-                  res.bucket,
-                  res.path,
-                ).catch(console.error);
-              });
+              processResumeBackground(
+                auth.user.id,
+                jobId,
+                res.id,
+                entryName,
+                undefined,
+                entryBytes,
+                res.bucket,
+                res.path,
+              ).catch(console.error);
             });
           }
         } catch (e: any) {
@@ -293,10 +288,9 @@ export async function POST(req: Request) {
     );
 
     if (result.ok) {
-      // Fire and forget parsing using after() to keep runtime alive on Vercel
-      const delayMs = (typeof staggerIndex === "number" && !isNaN(staggerIndex) ? staggerIndex : 0) * 10000;
+      // Fire and forget parsing immediately using after() to keep runtime alive on Vercel
       after(() => {
-        const runBackground = () => processResumeBackground(
+        processResumeBackground(
           auth.user.id,
           jobId,
           result.id,
@@ -306,12 +300,6 @@ export async function POST(req: Request) {
           result.bucket,
           result.path,
         ).catch(console.error);
-
-        if (delayMs > 0) {
-          sleep(delayMs).then(runBackground);
-        } else {
-          runBackground();
-        }
       });
     }
 

@@ -54,37 +54,18 @@ export async function POST(req: Request) {
     );
 
     if (result.ok) {
-      // 3. Fire and forget parsing, with staggering delay if index provided
-      const delayMs = (typeof staggerIndex === "number" ? staggerIndex : 0) * 10000;
-      if (delayMs > 0) {
-        setTimeout(() => {
-          processResumeBackground(
-            auth.user.id,
-            jobId,
-            result.id,
-            fileName,
-            mimeType,
-            bytes,
-            result.bucket,
-            result.path
-          ).catch((err) => {
-            console.error("Google Drive background parsing error:", err);
-          });
-        }, delayMs);
-      } else {
-        processResumeBackground(
-          auth.user.id,
-          jobId,
-          result.id,
-          fileName,
-          mimeType,
-          bytes,
-          result.bucket,
-          result.path
-        ).catch((err) => {
-          console.error("Google Drive background parsing error:", err);
-        });
-      }
+      processResumeBackground(
+        auth.user.id,
+        jobId,
+        result.id,
+        fileName,
+        mimeType,
+        bytes,
+        result.bucket,
+        result.path
+      ).catch((err) => {
+        console.error("Google Drive background parsing error:", err);
+      });
     }
 
     return NextResponse.json({ success: true, data: result });

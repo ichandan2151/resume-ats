@@ -145,6 +145,8 @@ function classifyError(error: any): OpenAIError {
 export async function parseResumeWithOpenAI(
   text: string,
   jobContext: string = "Not provided",
+  maxRetries = 4,
+  initialDelayMs = 2000,
 ): Promise<OpenAIResult> {
   if (!process.env.OPENAI_API_KEY) {
     return {
@@ -236,32 +238,45 @@ export async function parseResumeWithOpenAI(
     - SCORING: If the Job Context is "Not provided" or vague, score the candidate based on their general strength as a professional. Otherwise, strictly score their relevance to the actual job description. Be objective.
   `;
 
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: "You are a professional assistant specialized in parsing resumes into structured JSON formats.",
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.1,
-    });
+  let attempt = 0;
+  while (true) {
+    attempt++;
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: "You are a professional assistant specialized in parsing resumes into structured JSON formats.",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.1,
+      });
 
-    const responseText = response.choices[0]?.message?.content;
-    if (!responseText) {
-      throw new Error("Empty response from OpenAI");
+      const responseText = response.choices[0]?.message?.content;
+      if (!responseText) {
+        throw new Error("Empty response from OpenAI");
+      }
+
+      const parsed = JSON.parse(responseText.trim());
+      return { success: true, data: parsed };
+    } catch (error: any) {
+      const classified = classifyError(error);
+      if (classified.retryable && attempt < maxRetries) {
+        const delay = initialDelayMs * Math.pow(2, attempt - 1);
+        console.warn(
+          `OpenAI parsing transient error (code: ${classified.code}). Retrying in ${delay}ms... (Attempt ${attempt}/${maxRetries})`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      console.error(`OpenAI parsing failed after ${attempt} attempt(s):`, error);
+      return classified;
     }
-
-    const parsed = JSON.parse(responseText.trim());
-    return { success: true, data: parsed };
-  } catch (error: any) {
-    console.error("OpenAI parsing failed:", error);
-    return classifyError(error);
   }
 }

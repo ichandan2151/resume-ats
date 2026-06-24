@@ -71,6 +71,29 @@ const getLinkedInUrl = (linkedin: string): string => {
   return `https://linkedin.com/in/${trimmed}`;
 };
 
+async function runWithConcurrencyLimit<T>(
+  limit: number,
+  items: T[],
+  taskFn: (item: T) => Promise<void>
+): Promise<void> {
+  const queue = [...items];
+  const workers = Array(Math.min(limit, items.length))
+    .fill(null)
+    .map(async () => {
+      while (queue.length > 0) {
+        const item = queue.shift();
+        if (item !== undefined) {
+          try {
+            await taskFn(item);
+          } catch (e) {
+            console.error("Concurrency worker error:", e);
+          }
+        }
+      }
+    });
+  await Promise.all(workers);
+}
+
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 type CandidateRow = {
@@ -368,13 +391,11 @@ export default function CandidateDirectory(props: { onResumesChanged?: () => voi
         }
       }
 
-      let uploadIndex = 0;
-      for (const item of filesToUpload) {
+      await runWithConcurrencyLimit(5, filesToUpload, async (item) => {
         const fd = new FormData();
         const mimeType = getMimeType(item.name);
         const fileObj = new File([item.blob], item.name, { type: mimeType });
         fd.append("file", fileObj);
-        fd.append("staggerIndex", String(uploadIndex));
 
         try {
           const res = await fetch("/api/resumes/upload", {
@@ -391,13 +412,11 @@ export default function CandidateDirectory(props: { onResumesChanged?: () => voi
 
           if (!res.ok) {
             errors.push(`${item.name}: ${json?.error ?? `Upload failed with status ${res.status}`}`);
-          } else {
-            uploadIndex++;
           }
         } catch (fetchErr: any) {
           errors.push(`${item.name}: Network/Upload error (${fetchErr.message ?? String(fetchErr)})`);
         }
-      }
+      });
 
       if (errors.length > 0) {
         setErr(`Failed to upload some files:\n${errors.join("\n")}`);
@@ -565,11 +584,9 @@ export default function CandidateDirectory(props: { onResumesChanged?: () => voi
       errors: [],
     });
 
-    for (let i = 0; i < docs.length; i++) {
-      const doc = docs[i];
+    await runWithConcurrencyLimit(5, docs, async (doc) => {
       setImportState(prev => ({
         ...prev,
-        current: i + 1,
         currentFileName: doc.name,
       }));
 
@@ -585,7 +602,6 @@ export default function CandidateDirectory(props: { onResumesChanged?: () => voi
             fileName: doc.name,
             mimeType: doc.mimeType,
             jobId: null, // Candidate Directory uploads - no job scope
-            staggerIndex: i, 
           }),
         });
 
@@ -594,6 +610,7 @@ export default function CandidateDirectory(props: { onResumesChanged?: () => voi
 
         setImportState(prev => ({
           ...prev,
+          current: Math.min(prev.total, prev.current + 1),
           successCount: prev.successCount + 1,
         }));
         
@@ -602,13 +619,12 @@ export default function CandidateDirectory(props: { onResumesChanged?: () => voi
         console.error("File import failed:", doc.name, err);
         setImportState(prev => ({
           ...prev,
+          current: Math.min(prev.total, prev.current + 1),
           failCount: prev.failCount + 1,
           errors: [...prev.errors, { name: doc.name, error: err.message ?? "Unknown error" }],
         }));
       }
-
-      await new Promise(resolve => setTimeout(resolve, 550));
-    }
+    });
 
     setImportState(prev => ({
       ...prev,
