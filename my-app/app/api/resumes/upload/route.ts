@@ -211,6 +211,9 @@ export async function POST(req: Request) {
     const jobIdRaw = form.get("id") || form.get("jobId");
     const jobId = typeof jobIdRaw === "string" && jobIdRaw.trim() ? jobIdRaw.trim() : null;
 
+    const staggerIndexRaw = form.get("staggerIndex");
+    const staggerIndex = staggerIndexRaw ? parseInt(String(staggerIndexRaw), 10) : 0;
+
     if (!file)
       return NextResponse.json({ error: "Missing file" }, { status: 400 });
 
@@ -291,8 +294,9 @@ export async function POST(req: Request) {
 
     if (result.ok) {
       // Fire and forget parsing using after() to keep runtime alive on Vercel
+      const delayMs = (typeof staggerIndex === "number" && !isNaN(staggerIndex) ? staggerIndex : 0) * 10000;
       after(() => {
-        processResumeBackground(
+        const runBackground = () => processResumeBackground(
           auth.user.id,
           jobId,
           result.id,
@@ -302,6 +306,12 @@ export async function POST(req: Request) {
           result.bucket,
           result.path,
         ).catch(console.error);
+
+        if (delayMs > 0) {
+          sleep(delayMs).then(runBackground);
+        } else {
+          runBackground();
+        }
       });
     }
 

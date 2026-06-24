@@ -271,21 +271,79 @@ export default function CandidateDirectory(props: { onResumesChanged?: () => voi
     setUploading(true);
     setErr(null);
     const errors: string[] = [];
-    try {
-      for (const file of files) {
-        const fd = new FormData();
-        fd.append("file", file);
 
-        const res = await fetch("/api/resumes/upload", {
-          method: "POST",
-          body: fd,
-        });
-        const json = await res.json();
-        if (!res.ok) errors.push(`${file.name}: ${json?.error ?? "Upload failed"}`);
+    const getMimeType = (fileName: string) => {
+      const ext = fileName.split(".").pop()?.toLowerCase();
+      if (ext === "pdf") return "application/pdf";
+      if (ext === "docx") return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      if (ext === "txt") return "text/plain";
+      return "application/octet-stream";
+    };
+
+    try {
+      const filesToUpload: { name: string; blob: Blob }[] = [];
+
+      for (const file of files) {
+        if (file.name.toLowerCase().endsWith(".zip") || file.type === "application/zip") {
+          try {
+            const JSZip = (await import("jszip")).default;
+            const zip = await JSZip.loadAsync(file);
+            const entries = Object.values(zip.files).filter((entry) => !entry.dir);
+
+            for (const entry of entries) {
+              const entryName = entry.name.split("/").pop() || entry.name;
+              // Skip system files and macOS metadata folders/files
+              if (entryName.startsWith(".") || entry.name.includes("__MACOSX")) {
+                continue;
+              }
+              if (!/\.(pdf|docx|txt)$/i.test(entryName)) {
+                errors.push(`${entryName}: Unsupported file type inside zip (only pdf/docx/txt allowed)`);
+                continue;
+              }
+              const blob = await entry.async("blob");
+              filesToUpload.push({ name: entryName, blob });
+            }
+          } catch (zipErr: any) {
+            errors.push(`${file.name}: Failed to extract zip file (${zipErr.message ?? String(zipErr)})`);
+          }
+        } else {
+          filesToUpload.push({ name: file.name, blob: file });
+        }
+      }
+
+      let uploadIndex = 0;
+      for (const item of filesToUpload) {
+        const fd = new FormData();
+        const mimeType = getMimeType(item.name);
+        const fileObj = new File([item.blob], item.name, { type: mimeType });
+        fd.append("file", fileObj);
+        fd.append("staggerIndex", String(uploadIndex));
+
+        try {
+          const res = await fetch("/api/resumes/upload", {
+            method: "POST",
+            body: fd,
+          });
+
+          let json: any = null;
+          try {
+            json = await res.json();
+          } catch (_) {
+            // Non-JSON response from server (e.g. timeout, large payload HTML page)
+          }
+
+          if (!res.ok) {
+            errors.push(`${item.name}: ${json?.error ?? `Upload failed with status ${res.status}`}`);
+          } else {
+            uploadIndex++;
+          }
+        } catch (fetchErr: any) {
+          errors.push(`${item.name}: Network/Upload error (${fetchErr.message ?? String(fetchErr)})`);
+        }
       }
 
       if (errors.length > 0) {
-        setErr(`Failed to upload ${errors.length} file(s):\n${errors.join("\n")}`);
+        setErr(`Failed to upload some files:\n${errors.join("\n")}`);
       }
 
       setFiles([]);

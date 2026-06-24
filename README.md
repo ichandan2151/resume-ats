@@ -73,9 +73,9 @@ SMTP_SECURE=false
 
 ---
 
-## 🗄 Database Schema & Migrations
+## 🗄 Database Schema Details
 
-The database schema is managed in the `supabase/migrations` directory and contains tables with Row Level Security (RLS) policies:
+The database schema is configured in Supabase with the following tables and Row Level Security (RLS) policies:
 
 ### 1. `profiles` Table
 
@@ -152,15 +152,11 @@ Stores candidates details, parsed JSON objects, matching scores, and references 
     npm install
     ```
 
-2.  **Run migrations and configure Supabase:**
-    Apply the schemas in the `supabase/migrations/` folder directly to your database instance via the Supabase dashboard or the CLI.
+2.  **Configure Supabase:**
+    Create the necessary tables (`profiles`, `jobs`, `resumes`) in your Supabase database instance.
 
 3.  **Run the development server:**
 
     ```bash
     npm run dev
     ```
-
-4.  **Verification Scripts:**
-    - Use the `./scripts/list-models.sh` shell script to verify your `GEMINI_API_KEY` is active and query list of supported models.
-    - Run `node scripts/test-gemini.js` to execute a local test parsing run against mock resume structures.
