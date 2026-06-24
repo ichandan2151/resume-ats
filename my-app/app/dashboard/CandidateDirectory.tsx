@@ -14,6 +14,63 @@ const formatVisaStatus = (status: string) => {
   };
   return map[status.toLowerCase()] || status;
 };
+
+const isValidLinkedInUrl = (url: string | null | undefined): boolean => {
+  if (!url) return false;
+  const trimmed = url.trim().toLowerCase();
+  
+  if (
+    trimmed === "" ||
+    trimmed === "linkedin" ||
+    trimmed === "https://linkedin" ||
+    trimmed === "https://linkedin/" ||
+    trimmed === "https://www.linkedin.com" ||
+    trimmed === "https://www.linkedin.com/" ||
+    trimmed === "https://linkedin.com" ||
+    trimmed === "https://linkedin.com/" ||
+    trimmed === "linkedin.com" ||
+    trimmed === "linkedin.com/" ||
+    trimmed === "www.linkedin.com" ||
+    trimmed === "www.linkedin.com/"
+  ) {
+    return false;
+  }
+
+  let path = trimmed;
+  if (path.startsWith("http://")) path = path.slice(7);
+  if (path.startsWith("https://")) path = path.slice(8);
+  if (path.startsWith("www.")) path = path.slice(4);
+  if (path.startsWith("linkedin.com")) path = path.slice(12);
+  if (path.startsWith("linkedin/")) path = path.slice(9);
+  if (path.startsWith("linkedin")) path = path.slice(8);
+
+  path = path.replace(/^\/+|\/+$/g, "");
+
+  if (path === "") return false;
+  if (path === "in" || path === "pub") return false;
+  if (path.startsWith("in/") && path.slice(3).trim() === "") return false;
+  if (path.startsWith("pub/") && path.slice(4).trim() === "") return false;
+
+  return true;
+};
+
+const getLinkedInUrl = (linkedin: string): string => {
+  const trimmed = linkedin.trim();
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return trimmed;
+  }
+  if (trimmed.toLowerCase().includes("linkedin.com")) {
+    return `https://${trimmed}`;
+  }
+  if (trimmed.startsWith("/")) {
+    return `https://linkedin.com${trimmed}`;
+  }
+  if (trimmed.toLowerCase().startsWith("in/")) {
+    return `https://linkedin.com/${trimmed}`;
+  }
+  return `https://linkedin.com/in/${trimmed}`;
+};
+
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 type CandidateRow = {
@@ -984,9 +1041,9 @@ export default function CandidateDirectory(props: { onResumesChanged?: () => voi
                     <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
                       {c.email && <span className="text-zinc-650 dark:text-zinc-300">{c.email}</span>}
                       {c.phone && <span className="text-zinc-400 dark:text-zinc-500">{c.phone}</span>}
-                      {c.parsed_json?.linkedin && (
+                      {isValidLinkedInUrl(c.parsed_json?.linkedin) && (
                         <a
-                          href={c.parsed_json.linkedin.startsWith("http") ? c.parsed_json.linkedin : `https://${c.parsed_json.linkedin}`}
+                          href={getLinkedInUrl(c.parsed_json.linkedin)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
