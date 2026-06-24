@@ -23,7 +23,7 @@ export async function POST(
   // 1. Fetch the resume row to verify ownership and get data
   const { data: resume, error: fetchErr } = await supabase
     .from("resumes")
-    .select("id, status, extracted_text, job_id, storage_bucket, storage_path")
+    .select("id, status, extracted_text, job_id, storage_bucket, storage_path, original_filename, owner_id")
     .eq("id", id)
     .single();
 
@@ -38,7 +38,17 @@ export async function POST(
     );
   }
 
-  if (!resume.extracted_text && !resume.storage_path) {
+  let finalStoragePath = resume.storage_path || "";
+  let finalStorageBucket = resume.storage_bucket || "resumes";
+
+  if (!finalStoragePath && resume.original_filename) {
+    const safeName = (s: string) => s.replace(/[^\w.-]+/g, "_").slice(0, 120);
+    finalStoragePath = resume.job_id
+      ? `${resume.owner_id}/${resume.job_id}/${id}/${safeName(resume.original_filename)}`
+      : `${resume.owner_id}/candidates/${id}/${safeName(resume.original_filename)}`;
+  }
+
+  if (!resume.extracted_text && !finalStoragePath) {
     return NextResponse.json(
       { error: "No text or storage path available for this resume. Please re-upload." },
       { status: 400 },
@@ -63,8 +73,8 @@ export async function POST(
       resume.job_id,
       id,
       resume.extracted_text,
-      resume.storage_bucket,
-      resume.storage_path,
+      finalStorageBucket,
+      finalStoragePath,
     ).catch(console.error);
   });
 
@@ -123,10 +133,14 @@ export async function retryInBackground(
       
       textToUse = cleanText(rawText);
 
-      // Save extracted text to database so it doesn't need to be extracted again
+      // Save extracted text and persist the reconstructed storage bucket/path to database
       await supabaseAdmin
         .from("resumes")
-        .update({ extracted_text: textToUse })
+        .update({ 
+          extracted_text: textToUse,
+          storage_bucket: bucket,
+          storage_path: path
+        })
         .eq("id", id);
     }
 
