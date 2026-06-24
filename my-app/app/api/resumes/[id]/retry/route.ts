@@ -31,9 +31,9 @@ export async function POST(
     return NextResponse.json({ error: "Resume not found" }, { status: 404 });
   }
 
-  if (resume.status !== "failed" && resume.status !== "error") {
+  if (resume.status === "uploaded" || resume.status === "processing") {
     return NextResponse.json(
-      { error: "Only failed resumes can be retried" },
+      { error: "Resume is currently processing and cannot be retried yet" },
       { status: 400 },
     );
   }
@@ -45,10 +45,15 @@ export async function POST(
     );
   }
 
-  // 2. Set status back to "uploaded" (processing) so the UI shows the spinner
+  // 2. Set status back to "uploaded" (processing) so the UI shows the spinner, and clear old score
   await supabase
     .from("resumes")
-    .update({ status: "uploaded", parsed_json: null })
+    .update({ 
+      status: "uploaded", 
+      parsed_json: null,
+      score: null,
+      score_breakdown: {}
+    })
     .eq("id", id);
 
   // 3. Fire and forget the background re-processing using after() to support serverless runtime

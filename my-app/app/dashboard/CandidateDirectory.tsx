@@ -1116,6 +1116,18 @@ export default function CandidateDirectory(props: { onResumesChanged?: () => voi
                         >
                           View resume
                         </a>
+                        {c.status !== "uploaded" && (
+                          <button
+                            onClick={() => retryResume(c.id)}
+                            disabled={retryingIds.has(c.id)}
+                            className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/40 px-2.5 py-1 font-semibold text-amber-700 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/60 disabled:opacity-50 cursor-pointer"
+                            title={c.status === "failed" || c.status === "error" ? "Retry parsing this candidate" : "Re-score and re-parse this candidate"}
+                          >
+                            {retryingIds.has(c.id)
+                              ? "Retrying..."
+                              : (c.status === "failed" || c.status === "error" ? "Retry" : "Rerun")}
+                          </button>
+                        )}
                         <button
                           onClick={() => { setDeleteCandidate(c); setDeleteOpen(true); }}
                           disabled={c.status === "uploaded"}

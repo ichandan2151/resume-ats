@@ -859,13 +859,16 @@ export default function SearchCandidateClient({ id }: { id: string }) {
                             >
                               View
                             </a>
-                            {(r.status === "failed" || r.status === "error") && (
+                            {r.status !== "uploaded" && (
                               <button
                                 onClick={() => retryResume(r.id)}
                                 disabled={retryingIds.has(r.id)}
                                 className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/40 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/60 disabled:opacity-50 cursor-pointer"
+                                title={r.status === "failed" || r.status === "error" ? "Retry parsing this candidate" : "Re-score and re-parse this candidate"}
                               >
-                                {retryingIds.has(r.id) ? "Retrying..." : "Retry"}
+                                {retryingIds.has(r.id)
+                                  ? "Retrying..."
+                                  : (r.status === "failed" || r.status === "error" ? "Retry" : "Rerun")}
                               </button>
                             )}
                             <button
