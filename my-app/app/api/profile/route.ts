@@ -171,7 +171,7 @@ export async function PATCH(req: Request) {
     if (existErr) {
       if (existErr.code === "PGRST205") {
         return NextResponse.json(
-          { error: "Profiles table does not exist in Supabase yet. Please run the SQL migration in `supabase/migrations/20240523000003_create_profiles.sql` in your Supabase dashboard SQL editor." },
+          { error: "Profiles table does not exist in Supabase yet. Please set up the profiles table in your Supabase dashboard database schema." },
           { status: 400 }
         );
       }

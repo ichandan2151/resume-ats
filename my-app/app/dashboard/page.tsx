@@ -23,13 +23,46 @@ export default function DashboardPage() {
   const [searchCampaigns, setSearchCampaigns] = useState<SearchCampaign[]>([]);
   const [loadingCampaigns, setLoadingCampaigns] = useState(true);
   const [activeTab, setActiveTab] = useState<"searchCampaigns" | "candidates" | "profile">("searchCampaigns");
+  const [totalResumes, setTotalResumes] = useState<number>(0);
+  const [loadingResumesCount, setLoadingResumesCount] = useState(true);
+
+  async function fetchResumesCount() {
+    try {
+      const res = await fetch("/api/profile");
+      const json = await res.json();
+      if (res.ok) {
+        setTotalResumes(json.totalResumes ?? 0);
+        return json.totalResumes ?? 0;
+      }
+    } catch (e) {
+      console.error("Error fetching resumes count:", e);
+    } finally {
+      setLoadingResumesCount(false);
+    }
+    return 0;
+  }
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const tab = params.get("tab");
-    if (tab === "candidates" || tab === "profile" || tab === "searchCampaigns") {
-      setActiveTab(tab as any);
+    async function initDashboard() {
+      let currentTab: "searchCampaigns" | "candidates" | "profile" = "searchCampaigns";
+      const params = new URLSearchParams(window.location.search);
+      const tab = params.get("tab");
+      if (tab === "candidates" || tab === "profile" || tab === "searchCampaigns") {
+        currentTab = tab as any;
+        setActiveTab(currentTab);
+      }
+
+      const count = await fetchResumesCount();
+      // If there's no tab in URL and resume count is 0, default to candidates (Candidate Directory)
+      if (!tab && count === 0) {
+        setActiveTab("candidates");
+        const url = new URL(window.location.href);
+        url.searchParams.set("tab", "candidates");
+        window.history.replaceState({}, "", url.toString());
+      }
     }
+
+    initDashboard();
   }, []);
 
   const handleTabChange = (tab: "searchCampaigns" | "candidates" | "profile") => {
@@ -113,7 +146,9 @@ export default function DashboardPage() {
       },
       {
         title: "Start a Search Campaign 📋",
-        description: "Click '+ Search Candidate' to define a search description. The AI parses applicant files against these requirements to score them.",
+        description: totalResumes === 0
+          ? "Once you have resumes in your Candidate Directory, click '+ Search Candidate' to define search description and score candidates."
+          : "Click '+ Search Candidate' to define a search description. The AI parses applicant files against these requirements to score them.",
         icon: "💼",
         gradient: "from-blue-600 to-cyan-600",
         shadow: "shadow-blue-900/35",
@@ -139,7 +174,7 @@ export default function DashboardPage() {
         targetId: null
       }
     ];
-  }, [open]);
+  }, [open, totalResumes]);
 
   useEffect(() => {
     const tourCompleted = localStorage.getItem("patternix_onboarding_completed");
@@ -293,13 +328,15 @@ export default function DashboardPage() {
 
               <button
                 id="tour-create-campaign"
+                disabled={totalResumes === 0}
                 onClick={() => {
                   setOpen(true);
                   if (showTour) {
                     setTourStep(0);
                   }
                 }}
-                className="hidden rounded-xl bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-white md:inline-flex"
+                className="hidden rounded-xl bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-white md:inline-flex disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-zinc-100"
+                title={totalResumes === 0 ? "Upload candidate resumes in the Candidate Directory first to enable search" : ""}
               >
                 + Search Candidate
               </button>
@@ -405,17 +442,54 @@ export default function DashboardPage() {
                 ))}
 
                 {searchCampaigns.length === 0 && (
-                  <div className="rounded-2xl border border-zinc-800 border-dashed bg-transparent p-8 text-zinc-400">
-                    No searchCampaigns yet. Click{" "}
-                    <span className="text-zinc-200">Search Candidate</span> to get
-                    started.
-                  </div>
+                  totalResumes === 0 ? (
+                    <div className="col-span-full rounded-2xl border border-dashed border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/10 p-8 text-center max-w-lg mx-auto my-6 shadow-sm dark:shadow-none">
+                      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 dark:bg-amber-950/20 text-amber-500 mb-4 text-xl">
+                        ⚠️
+                      </div>
+                      <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Upload Resumes to Enable Search</h3>
+                      <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+                        Before launching a search campaign, you must upload candidate resumes to the Candidate Directory. Patternix uses this directory to auto-import and score candidates.
+                      </p>
+                      <div className="mt-5 flex justify-center">
+                        <button
+                          onClick={() => handleTabChange("candidates")}
+                          className="rounded-xl bg-zinc-900 dark:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-white px-4 py-2.5 text-sm font-semibold text-zinc-50 dark:text-zinc-950 transition cursor-pointer"
+                        >
+                          Go to Candidate Directory & Upload
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="col-span-full rounded-2xl border border-dashed border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/10 p-8 text-center max-w-lg mx-auto my-6 shadow-sm dark:shadow-none">
+                      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-violet-50 dark:bg-violet-950/20 text-violet-500 mb-4 text-xl">
+                        💼
+                      </div>
+                      <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Create Your First Search Campaign</h3>
+                      <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+                        You have candidate resumes in your Candidate Directory! Now create a search campaign with your job description and requirements to grade them.
+                      </p>
+                      <div className="mt-5 flex justify-center">
+                        <button
+                          onClick={() => {
+                            setOpen(true);
+                            if (showTour) {
+                              setTourStep(0);
+                            }
+                          }}
+                          className="rounded-xl bg-zinc-900 dark:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-white px-4 py-2.5 text-sm font-semibold text-zinc-50 dark:text-zinc-950 transition cursor-pointer"
+                        >
+                          + Create Search Campaign
+                        </button>
+                      </div>
+                    </div>
+                  )
                 )}
               </div>
             )}
           </>
         ) : activeTab === "candidates" ? (
-          <CandidateDirectory />
+          <CandidateDirectory onResumesChanged={fetchResumesCount} />
         ) : (
           <ProfileCard onStartTour={() => {
             handleTabChange("searchCampaigns");
@@ -1076,7 +1150,7 @@ function ProfileCard(props: { onStartTour: () => void }) {
             <div className="mt-4 text-2xl font-bold text-zinc-900 dark:text-white">$0 <span className="text-xs font-normal text-zinc-400 dark:text-zinc-500">/ forever</span></div>
             <ul className="mt-4 space-y-2 text-xs text-zinc-500 dark:text-zinc-400">
               <li className="flex items-center gap-1.5">✓ Up to 50 resumes parsed</li>
-              <li className="flex items-center gap-1.5">✓ Standard Gemini 1.5 Flash parsing</li>
+              <li className="flex items-center gap-1.5">✓ Standard GPT-4o Mini parsing</li>
               <li className="flex items-center gap-1.5">✓ Basic Candidate Scoring</li>
             </ul>
           </div>
@@ -1107,7 +1181,7 @@ function ProfileCard(props: { onStartTour: () => void }) {
             <div className="mt-4 text-2xl font-bold text-zinc-900 dark:text-white">$19 <span className="text-xs font-normal text-zinc-400 dark:text-zinc-500">/ month</span></div>
             <ul className="mt-4 space-y-2 text-xs text-zinc-600 dark:text-zinc-400 font-medium">
               <li className="flex items-center gap-1.5 text-violet-600 dark:text-violet-300">✓ Unlimited resume parses</li>
-              <li className="flex items-center gap-1.5">✓ Advanced Gemini 1.5 Pro deep evaluation</li>
+              <li className="flex items-center gap-1.5">✓ Advanced GPT-4o deep evaluation</li>
               <li className="flex items-center gap-1.5">✓ Staggered bulk imports & faster indexing</li>
               <li className="flex items-center gap-1.5">✓ Priority direct recruiter support</li>
             </ul>

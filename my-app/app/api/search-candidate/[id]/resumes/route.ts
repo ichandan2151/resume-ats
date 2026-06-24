@@ -18,11 +18,26 @@ export async function GET(
   const limit = 30;
   const from = (page - 1) * limit;
   const to = from + limit - 1;
+  const sortField = url.searchParams.get("sort_field")?.trim();
+  const sortDirection = url.searchParams.get("sort_direction")?.trim() || "desc";
 
   const supabase = await createSupabaseServerClient();
   const { data: auth } = await supabase.auth.getUser();
   if (!auth.user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const all = url.searchParams.get("all") === "true";
+  if (all) {
+    const { data: allResumes, error: allErr } = await supabase
+      .from("resumes")
+      .select("email, original_filename")
+      .eq("job_id", id);
+
+    if (allErr) {
+      return NextResponse.json({ error: allErr.message }, { status: 500 });
+    }
+    return NextResponse.json({ data: allResumes });
+  }
 
   // 1. Fetch matching stats (counts and scores) to calculate totals/average on server side
   let statsQuery = supabase
@@ -69,9 +84,21 @@ export async function GET(
     .select(
       "id, original_filename, full_name, email, phone, score, status, created_at, parsed_json"
     )
-    .eq("job_id", id)
-    .order("created_at", { ascending: false })
-    .range(from, to);
+    .eq("job_id", id);
+
+  if (sortField === "score") {
+    dataQuery = dataQuery
+      .order("score", { ascending: sortDirection === "asc", nullsFirst: false })
+      .order("created_at", { ascending: false });
+  } else if (sortField === "status") {
+    dataQuery = dataQuery
+      .order("status", { ascending: sortDirection === "asc", nullsFirst: false })
+      .order("created_at", { ascending: false });
+  } else {
+    dataQuery = dataQuery.order("created_at", { ascending: false });
+  }
+
+  dataQuery = dataQuery.range(from, to);
 
   if (location) {
     dataQuery = dataQuery.ilike("parsed_json->>candidate_location", `%${location}%`);

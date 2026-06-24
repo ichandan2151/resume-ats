@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { parseResumeWithGemini } from "@/lib/gemini";
+import { parseResumeWithOpenAI } from "@/lib/openai";
 
 export const runtime = "nodejs";
 
@@ -38,9 +38,9 @@ export async function POST(
     );
   }
 
-  if (!resume.extracted_text) {
+  if (!resume.extracted_text && !resume.storage_path) {
     return NextResponse.json(
-      { error: "No extracted text available for this resume. Please re-upload." },
+      { error: "No text or storage path available for this resume. Please re-upload." },
       { status: 400 },
     );
   }
@@ -51,24 +51,26 @@ export async function POST(
     .update({ status: "uploaded", parsed_json: null })
     .eq("id", id);
 
-  // 3. Fire and forget the background re-processing
-  retryInBackground(
-    auth.user.id,
-    resume.job_id,
-    id,
-    resume.extracted_text,
-    resume.storage_bucket,
-    resume.storage_path,
-  ).catch(console.error);
+  // 3. Fire and forget the background re-processing using after() to support serverless runtime
+  after(() => {
+    retryInBackground(
+      auth.user.id,
+      resume.job_id,
+      id,
+      resume.extracted_text,
+      resume.storage_bucket,
+      resume.storage_path,
+    ).catch(console.error);
+  });
 
   return NextResponse.json({ success: true, message: "Retry started" });
 }
 
-async function retryInBackground(
+export async function retryInBackground(
   userId: string,
-  jobId: string,
+  jobId: string | null,
   id: string,
-  extractedText: string,
+  extractedText: string | null,
   bucket: string,
   path: string,
 ) {
@@ -83,41 +85,83 @@ async function retryInBackground(
   );
 
   try {
-    // Fetch job context
-    let jobContext = "Not provided";
-    const { data: jobData } = await supabaseAdmin
-      .from("jobs")
-      .select("title, description")
-      .eq("id", jobId)
-      .single();
+    let textToUse = extractedText;
 
-    if (jobData) {
-      jobContext = `Title: ${jobData.title || "Unknown"}\nDescription: ${
-        jobData.description || "Not provided"
-      }`;
+    if (!textToUse && bucket && path) {
+      console.log(`Downloading file from storage: bucket=${bucket}, path=${path}`);
+      const { data: fileData, error: downloadErr } = await supabaseAdmin.storage
+        .from(bucket)
+        .download(path);
+
+      if (downloadErr || !fileData) {
+        throw new Error(`Failed to download resume file from storage: ${downloadErr?.message ?? "Empty file data"}`);
+      }
+
+      // We need original_filename and mime_type to extract text
+      const { data: resumeRow, error: rowErr } = await supabaseAdmin
+        .from("resumes")
+        .select("original_filename, mime_type")
+        .eq("id", id)
+        .single();
+
+      if (rowErr || !resumeRow) {
+        throw new Error(`Failed to fetch original_filename/mime_type: ${rowErr?.message ?? "Row not found"}`);
+      }
+
+      const buffer = Buffer.from(await fileData.arrayBuffer());
+      const { extractText } = await import("@/lib/extract");
+      const rawText = await extractText(
+        resumeRow.original_filename,
+        resumeRow.mime_type || undefined,
+        buffer,
+      );
+      
+      textToUse = cleanText(rawText);
+
+      // Save extracted text to database so it doesn't need to be extracted again
+      await supabaseAdmin
+        .from("resumes")
+        .update({ extracted_text: textToUse })
+        .eq("id", id);
     }
 
-    const cleaned = cleanText(extractedText);
-    const geminiResult = await parseResumeWithGemini(cleaned, jobContext);
+    // Fetch job context
+    let jobContext = "Not provided";
+    if (jobId) {
+      const { data: jobData } = await supabaseAdmin
+        .from("jobs")
+        .select("title, description")
+        .eq("id", jobId)
+        .single();
 
-    if (!geminiResult.success) {
+      if (jobData) {
+        jobContext = `Title: ${jobData.title || "Unknown"}\nDescription: ${
+          jobData.description || "Not provided"
+        }`;
+      }
+    }
+
+    const cleaned = cleanText(textToUse ?? "");
+    const openaiResult = await parseResumeWithOpenAI(cleaned, jobContext);
+
+    if (!openaiResult.success) {
       await supabaseAdmin
         .from("resumes")
         .update({
           status: "error",
           parsed_json: {
-            error: geminiResult.message,
-            error_code: geminiResult.code,
-            retryable: geminiResult.retryable,
+            error: openaiResult.message,
+            error_code: openaiResult.code,
+            retryable: openaiResult.retryable,
           },
         })
         .eq("id", id);
       return;
     }
 
-    const geminiData = geminiResult.data;
-    const finalScore = geminiData.scoring?.score ?? 0;
-    const finalBreakdown = geminiData.scoring?.breakdown ?? {
+    const openaiData = openaiResult.data;
+    const finalScore = openaiData.scoring?.score ?? 0;
+    const finalBreakdown = openaiData.scoring?.breakdown ?? {
       relevance: "Scoring failed",
       strengths: [],
       weaknesses: [],
@@ -126,14 +170,14 @@ async function retryInBackground(
     await supabaseAdmin
       .from("resumes")
       .update({
-        full_name: geminiData.full_name,
-        email: geminiData.email,
-        phone: geminiData.phone,
+        full_name: openaiData.full_name,
+        email: openaiData.email,
+        phone: openaiData.phone,
         status: "scored",
-        score: finalScore,
-        score_breakdown: finalBreakdown,
-        scoring_version: "gemini-1.0",
-        parsed_json: geminiData,
+        score: jobId ? finalScore : null,
+        score_breakdown: jobId ? finalBreakdown : {},
+        scoring_version: "openai-1.0",
+        parsed_json: openaiData,
       })
       .eq("id", id);
   } catch (err: any) {

@@ -118,7 +118,7 @@ export async function sendResumeStatusNotification({
                     ${greeting}
                   </p>
                   <p style="margin-top: 0; margin-bottom: 24px; font-size: 15px; line-height: 24px; color: #71717a;">
-                    Resume parsing and Gemini evaluation has completed for your search campaign <strong>${searchTitle}</strong>. 
+                    Resume parsing and OpenAI evaluation has completed for your search campaign <strong>${searchTitle}</strong>. 
                     Here is a summary of the results:
                   </p>
                   

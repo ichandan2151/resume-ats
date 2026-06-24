@@ -1,6 +1,19 @@
 "use client";
 
 import React, { useState, useEffect, Fragment, useRef } from "react";
+
+const formatVisaStatus = (status: string) => {
+  if (!status) return "";
+  const map: Record<string, string> = {
+    citizen: "Citizen",
+    green_card: "Green Card",
+    h1b: "H1B",
+    opt: "OPT",
+    stem_opt: "STEM OPT",
+    cpt: "CPT",
+  };
+  return map[status.toLowerCase()] || status;
+};
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 type CandidateRow = {
@@ -15,7 +28,7 @@ type CandidateRow = {
   parsed_json?: any;
 };
 
-export default function CandidateDirectory() {
+export default function CandidateDirectory(props: { onResumesChanged?: () => void }) {
   const supabase = createSupabaseBrowserClient();
 
   const [candidates, setCandidates] = useState<CandidateRow[]>([]);
@@ -152,6 +165,7 @@ export default function CandidateDirectory() {
       setSelectedCandidateIds(new Set());
       setDeleteMultipleOpen(false);
       await fetchCandidates(page);
+      props.onResumesChanged?.();
     } catch (e: any) {
       setErr(e.message ?? "Bulk delete failed");
     } finally {
@@ -277,6 +291,7 @@ export default function CandidateDirectory() {
       setFiles([]);
       setUploadOpen(false);
       await fetchCandidates(1);
+      props.onResumesChanged?.();
     } catch (e: any) {
       setErr(e.message ?? "Upload error");
     } finally {
@@ -485,7 +500,8 @@ export default function CandidateDirectory() {
       status: 'completed',
     }));
 
-    fetchCandidates(1).catch(console.error);
+    await fetchCandidates(1).catch(console.error);
+    props.onResumesChanged?.();
   }
 
   // Handle recursively importing files inside folder
@@ -557,6 +573,7 @@ export default function CandidateDirectory() {
       setDeleteOpen(false);
       setDeleteCandidate(null);
       await fetchCandidates(page);
+      props.onResumesChanged?.();
     } catch (e: any) {
       setErr(e.message ?? "Delete failed");
     } finally {
@@ -738,12 +755,15 @@ export default function CandidateDirectory() {
           <select
             value={visaFilter}
             onChange={(e) => setVisaFilter(e.target.value)}
-            className="w-full rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600"
+            className="w-full rounded-lg border border-zinc-200 dark:border-zinc-850 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600"
           >
             <option value="">Any Visa Status</option>
             <option value="citizen">Citizen</option>
             <option value="green_card">Green Card</option>
             <option value="h1b">H1B</option>
+            <option value="opt">OPT</option>
+            <option value="stem_opt">STEM OPT</option>
+            <option value="cpt">CPT</option>
           </select>
         </div>
         <div>
@@ -931,7 +951,7 @@ export default function CandidateDirectory() {
                       )}
                       {c.parsed_json?.visa_status && (
                         <span className="rounded-md bg-blue-50 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-900/30 px-1.5 py-0.5 text-blue-700 dark:text-blue-250">
-                          {c.parsed_json.visa_status.replace("_", " ")}
+                          {formatVisaStatus(c.parsed_json.visa_status)}
                         </span>
                       )}
                       {c.parsed_json?.work_authorization && (

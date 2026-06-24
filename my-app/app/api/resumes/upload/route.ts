@@ -1,10 +1,10 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import JSZip from "jszip";
 
-import mammoth from "mammoth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { scoreResume } from "@/lib/parse";
-import { parseResumeWithGemini } from "@/lib/gemini";
+import { parseResumeWithOpenAI } from "@/lib/openai";
+import { extractText } from "@/lib/extract";
 import { lookup } from "mime-types";
 
 export const runtime = "nodejs";
@@ -29,44 +29,7 @@ function cleanJson(value: any): any {
   return value;
 }
 
-async function extractText(
-  filename: string,
-  mime: string | undefined,
-  bytes: Buffer,
-) {
-  const lower = filename.toLowerCase();
 
-  if (mime === "text/plain" || lower.endsWith(".txt")) {
-    return bytes.toString("utf-8");
-  }
-
-  if (mime === "application/pdf" || lower.endsWith(".pdf")) {
-    // Polyfill DOMMatrix for pdfjs
-    const { default: DOMMatrix } = await import("dommatrix");
-    (globalThis as any).DOMMatrix ??= DOMMatrix;
-
-    const { PDFParse } = await import("pdf-parse");
-
-    const path = await import("path");
-    const workerPath = path.join(
-      process.cwd(),
-      "node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
-    );
-    PDFParse.setWorker(workerPath);
-
-    const parser = new PDFParse({ data: bytes });
-    const out = await parser.getText();
-    return out.text ?? "";
-  }
-
-  if (mime?.includes("officedocument") || lower.endsWith(".docx")) {
-    const mammoth = await import("mammoth");
-    const out = await mammoth.extractRawText({ buffer: bytes });
-    return out.value ?? "";
-  }
-
-  return bytes.toString("utf-8");
-}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -160,9 +123,9 @@ export async function processResumeBackground(
     const raw = await extractText(fileName, mimeType, bytes);
     const extracted_text = cleanText(raw);
 
-    const geminiResult = await parseResumeWithGemini(extracted_text, jobContext);
+    const openaiResult = await parseResumeWithOpenAI(extracted_text, jobContext);
 
-    if (!geminiResult.success) {
+    if (!openaiResult.success) {
       // Store the structured error for the frontend
       await supabaseAdmin
         .from("resumes")
@@ -172,19 +135,19 @@ export async function processResumeBackground(
           extracted_text,
           status: "error",
           parsed_json: {
-            error: geminiResult.message,
-            error_code: geminiResult.code,
-            retryable: geminiResult.retryable,
+            error: openaiResult.message,
+            error_code: openaiResult.code,
+            retryable: openaiResult.retryable,
           },
         })
         .eq("id", id);
       return;
     }
 
-    const geminiData = geminiResult.data;
+    const openaiData = openaiResult.data;
 
-    const finalScore = geminiData.scoring?.score ?? 0;
-    const finalBreakdown = geminiData.scoring?.breakdown ?? {
+    const finalScore = openaiData.scoring?.score ?? 0;
+    const finalBreakdown = openaiData.scoring?.breakdown ?? {
       relevance: "Scoring failed",
       strengths: [],
       weaknesses: [],
@@ -196,14 +159,14 @@ export async function processResumeBackground(
         storage_bucket: bucket,
         storage_path: path,
         extracted_text,
-        full_name: geminiData.full_name,
-        email: geminiData.email,
-        phone: geminiData.phone,
+        full_name: openaiData.full_name,
+        email: openaiData.email,
+        phone: openaiData.phone,
         status: "scored",
         score: jobId ? finalScore : null,
-        score_breakdown: jobId ? finalBreakdown : null,
-        scoring_version: jobId ? "gemini-1.0" : null,
-        parsed_json: geminiData,
+        score_breakdown: jobId ? finalBreakdown : {},
+        scoring_version: "openai-1.0",
+        parsed_json: openaiData,
       })
       .eq("id", id);
 
@@ -290,20 +253,22 @@ export async function POST(req: Request) {
             uploaded.push(res);
 
             // Fire and forget parsing with staggered delay (10 seconds per file)
-            // to avoid overwhelming Gemini API's 2 RPM / Burst limits.
+            // using after() so the serverless function executes it post-response.
             const delayOffset = uploaded.length * 10000;
 
-            sleep(delayOffset).then(() => {
-              processResumeBackground(
-                auth.user.id,
-                jobId,
-                res.id,
-                entryName,
-                undefined,
-                entryBytes,
-                res.bucket,
-                res.path,
-              ).catch(console.error);
+            after(() => {
+              sleep(delayOffset).then(() => {
+                processResumeBackground(
+                  auth.user.id,
+                  jobId,
+                  res.id,
+                  entryName,
+                  undefined,
+                  entryBytes,
+                  res.bucket,
+                  res.path,
+                ).catch(console.error);
+              });
             });
           }
         } catch (e: any) {
@@ -325,17 +290,19 @@ export async function POST(req: Request) {
     );
 
     if (result.ok) {
-      // Fire and forget parsing
-      processResumeBackground(
-        auth.user.id,
-        jobId,
-        result.id,
-        name,
-        mime,
-        bytes,
-        result.bucket,
-        result.path,
-      ).catch(console.error);
+      // Fire and forget parsing using after() to keep runtime alive on Vercel
+      after(() => {
+        processResumeBackground(
+          auth.user.id,
+          jobId,
+          result.id,
+          name,
+          mime,
+          bytes,
+          result.bucket,
+          result.path,
+        ).catch(console.error);
+      });
     }
 
     return NextResponse.json({ data: result });

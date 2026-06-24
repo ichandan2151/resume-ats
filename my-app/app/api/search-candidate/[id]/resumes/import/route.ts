@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { parseResumeWithGemini } from "@/lib/gemini";
+import { parseResumeWithOpenAI } from "@/lib/openai";
 
 export const runtime = "nodejs";
 
@@ -37,27 +37,27 @@ export async function analyzeResumeBackground(
       }`;
     }
 
-    // 2) Score resume with Gemini using the target search campaign description
-    const geminiResult = await parseResumeWithGemini(extractedText, searchContext);
+    // 2) Score resume with OpenAI using the target search campaign description
+    const openaiResult = await parseResumeWithOpenAI(extractedText, searchContext);
 
-    if (!geminiResult.success) {
+    if (!openaiResult.success) {
       await supabaseAdmin
         .from("resumes")
         .update({
           status: "error",
           parsed_json: {
-            error: geminiResult.message,
-            error_code: geminiResult.code,
-            retryable: geminiResult.retryable,
+            error: openaiResult.message,
+            error_code: openaiResult.code,
+            retryable: openaiResult.retryable,
           },
         })
         .eq("id", id);
       return;
     }
 
-    const geminiData = geminiResult.data;
-    const finalScore = geminiData.scoring?.score ?? 0;
-    const finalBreakdown = geminiData.scoring?.breakdown ?? {
+    const openaiData = openaiResult.data;
+    const finalScore = openaiData.scoring?.score ?? 0;
+    const finalBreakdown = openaiData.scoring?.breakdown ?? {
       relevance: "Scoring failed",
       strengths: [],
       weaknesses: [],
@@ -73,7 +73,7 @@ export async function analyzeResumeBackground(
     const currentParsed = currentResume?.parsed_json || {};
     const updatedParsed = {
       ...currentParsed,
-      scoring: geminiData.scoring
+      scoring: openaiData.scoring
     };
 
     const { error: updErr } = await supabaseAdmin
@@ -82,7 +82,7 @@ export async function analyzeResumeBackground(
         status: "scored",
         score: finalScore,
         score_breakdown: finalBreakdown,
-        scoring_version: "gemini-1.0",
+        scoring_version: "openai-1.0",
         parsed_json: updatedParsed,
       })
       .eq("id", id);
@@ -210,14 +210,16 @@ export async function POST(
 
       importedIds.push(newRow.id);
 
-      // 4) Score the cloned candidate in the background
-      analyzeResumeBackground(
-        auth.user.id,
-        searchId,
-        newRow.id,
-        srcResume.extracted_text || "",
-        srcResume.original_filename,
-      ).catch(console.error);
+      // 4) Score the cloned candidate in the background using after() for Vercel
+      after(() => {
+        analyzeResumeBackground(
+          auth.user.id,
+          searchId,
+          newRow.id,
+          srcResume.extracted_text || "",
+          srcResume.original_filename,
+        ).catch(console.error);
+      });
     }
 
     return NextResponse.json({

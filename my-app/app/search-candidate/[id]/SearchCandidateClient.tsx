@@ -2,6 +2,19 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
+const formatVisaStatus = (status: string) => {
+  if (!status) return "";
+  const map: Record<string, string> = {
+    citizen: "Citizen",
+    green_card: "Green Card",
+    h1b: "H1B",
+    opt: "OPT",
+    stem_opt: "STEM OPT",
+    cpt: "CPT",
+  };
+  return map[status.toLowerCase()] || status;
+};
+
 type ResumeRow = {
   id: string;
   original_filename: string;
@@ -30,6 +43,19 @@ export default function SearchCandidateClient({ id }: { id: string }) {
   const [searchCandidate, setSearchCandidate] = useState<SearchCandidate | null>(null);
   const [showTour, setShowTour] = useState(false);
   const [tourStep, setTourStep] = useState(0);
+  const [existingIdentifiers, setExistingIdentifiers] = useState<{ email: string | null; original_filename: string }[]>([]);
+
+  const fetchExistingIdentifiers = async () => {
+    try {
+      const res = await fetch(`/api/search-candidate/${id}/resumes?all=true`);
+      const json = await res.json();
+      if (res.ok) {
+        setExistingIdentifiers(json.data ?? []);
+      }
+    } catch (e) {
+      console.error("Error fetching existing campaign candidates:", e);
+    }
+  };
 
   useEffect(() => {
     const tourCompleted = localStorage.getItem("patternix_search_onboarding_completed");
@@ -134,19 +160,19 @@ export default function SearchCandidateClient({ id }: { id: string }) {
 
   const existingEmails = useMemo(() => {
     return new Set(
-      rows
+      existingIdentifiers
         .map((r) => r.email?.trim().toLowerCase())
         .filter(Boolean)
     );
-  }, [rows]);
+  }, [existingIdentifiers]);
 
   const existingFilenames = useMemo(() => {
     return new Set(
-      rows
+      existingIdentifiers
         .map((r) => r.original_filename?.trim().toLowerCase())
         .filter(Boolean)
     );
-  }, [rows]);
+  }, [existingIdentifiers]);
 
   const isAlreadyInSearch = (c: any) => {
     const email = c.email?.trim().toLowerCase();
@@ -201,18 +227,7 @@ export default function SearchCandidateClient({ id }: { id: string }) {
     setWorkAuthFilter("");
     setStatusFilter("");
     setPage(1);
-    
-    const params = new URLSearchParams();
-    params.set("page", "1");
-    fetch(`/api/search-candidate/${id}/resumes?${params.toString()}`)
-      .then(res => res.json())
-      .then(json => {
-        setRows(json.data ?? []);
-        setTotalCount(json.totalCount ?? 0);
-        setTotalPages(json.totalPages ?? 1);
-        setServerAvgScore(json.avgScore ?? null);
-      })
-      .catch(console.error);
+    refreshResumes(1).catch(console.error);
   }
 
   // edit modal
@@ -242,17 +257,7 @@ export default function SearchCandidateClient({ id }: { id: string }) {
   const total = totalCount;
   const avgScore = serverAvgScore;
 
-  const sortedRows = useMemo(() => {
-    if (!sortField) return rows;
-    return [...rows].sort((a, b) => {
-      const aVal = sortField === "score" ? (a.score ?? 0) : a.status;
-      const bVal = sortField === "score" ? (b.score ?? 0) : b.status;
-
-      if (aVal < bVal) return sortDirection === "asc" ? -1 : 1;
-      if (aVal > bVal) return sortDirection === "asc" ? 1 : -1;
-      return 0;
-    });
-  }, [rows, sortField, sortDirection]);
+  const sortedRows = rows;
 
   async function loadSearchCandidate() {
     const res = await fetch(`/api/search-candidate/${id}`);
@@ -261,7 +266,7 @@ export default function SearchCandidateClient({ id }: { id: string }) {
     setSearchCandidate(json.data);
   }
 
-  async function refreshResumes(targetPage = page) {
+  async function refreshResumes(targetPage = page, field = sortField, direction = sortDirection) {
     const params = new URLSearchParams();
     if (locationFilter.trim())
       params.set("candidate_location", locationFilter.trim());
@@ -273,6 +278,10 @@ export default function SearchCandidateClient({ id }: { id: string }) {
     if (statusFilter.trim())
       params.set("status", statusFilter.trim());
     params.set("page", String(targetPage));
+    if (field) {
+      params.set("sort_field", field);
+      params.set("sort_direction", direction);
+    }
 
     const res = await fetch(`/api/search-candidate/${id}/resumes?${params.toString()}`);
     const json = await res.json();
@@ -282,6 +291,9 @@ export default function SearchCandidateClient({ id }: { id: string }) {
     setTotalPages(json.totalPages ?? 1);
     setServerAvgScore(json.avgScore ?? null);
     setSelectedSearchResumeIds(new Set());
+    
+    // Refresh existing identifiers list
+    fetchExistingIdentifiers();
   }
 
   async function refreshAll() {
@@ -309,7 +321,7 @@ export default function SearchCandidateClient({ id }: { id: string }) {
       refreshResumes(1);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locationFilter, minExpFilter, visaFilter, workAuthFilter, statusFilter]);
+  }, [locationFilter, minExpFilter, visaFilter, workAuthFilter, statusFilter, sortField, sortDirection]);
 
   // Polling mechanism: if any resume is "uploaded", refresh every 5s
   useEffect(() => {
@@ -549,6 +561,9 @@ export default function SearchCandidateClient({ id }: { id: string }) {
                 <option value="citizen">Citizen</option>
                 <option value="green_card">Green Card</option>
                 <option value="h1b">H1B</option>
+                <option value="opt">OPT</option>
+                <option value="stem_opt">STEM OPT</option>
+                <option value="cpt">CPT</option>
               </select>
               <select
                 value={workAuthFilter}
@@ -792,7 +807,7 @@ export default function SearchCandidateClient({ id }: { id: string }) {
                         )}
                         {r.parsed_json?.visa_status && (
                           <span className="rounded-md bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 px-1.5 py-0.5 text-blue-700 dark:text-blue-300">
-                            {r.parsed_json.visa_status.replace("_", " ")}
+                            {formatVisaStatus(r.parsed_json.visa_status)}
                           </span>
                         )}
                         {r.parsed_json?.work_authorization && (
@@ -1369,20 +1384,13 @@ export default function SearchCandidateClient({ id }: { id: string }) {
                 </p>
 
                 {/* Status Indicator */}
-                <div className="mt-6 w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/40 p-4 flex items-center justify-between gap-4 text-left">
-                  <div>
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-                      Status
-                    </div>
-                    <div className="mt-0.5 text-sm font-semibold text-zinc-800 dark:text-zinc-200">
-                      Imported {rows.length} Candidate{rows.length === 1 ? "" : "s"}
-                    </div>
+                <div className="mt-6 w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/40 p-4 flex items-start gap-3 text-left">
+                  <div className="relative flex h-3.5 w-3.5 mt-0.5 flex-shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-amber-500"></span>
                   </div>
-                  <div className="flex-1 text-right">
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 dark:bg-amber-950/20 px-2.5 py-1 text-xs font-semibold text-amber-600 dark:text-amber-400">
-                      <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-ping" />
-                      Analyzing {processingCount} Resumes...
-                    </span>
+                  <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 leading-normal">
+                    Candidate analysis is in progress. Please allow some time for the evaluation; we will notify you via email as soon as the results are ready.
                   </div>
                 </div>
 
@@ -1931,6 +1939,9 @@ function EditCandidateModal({
                 <option value="citizen">Citizen</option>
                 <option value="green_card">Green Card</option>
                 <option value="h1b">H1B</option>
+                <option value="opt">OPT</option>
+                <option value="stem_opt">STEM OPT</option>
+                <option value="cpt">CPT</option>
               </select>
             </div>
             <div>
