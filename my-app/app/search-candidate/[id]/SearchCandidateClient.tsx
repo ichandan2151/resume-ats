@@ -1262,7 +1262,8 @@ export default function SearchCandidateClient({ id }: { id: string }) {
             setSelectedDirIds((prev) => {
               const next = new Set(prev);
               dirCandidates.forEach((c) => {
-                if (!isAlreadyInSearch(c)) {
+                const isParsing = c.status === "uploaded" || c.status === "processing";
+                if (!isAlreadyInSearch(c) && !isParsing) {
                   next.add(c.id);
                 }
               });
@@ -2297,12 +2298,13 @@ function ImportFromDirectoryModal({
               {filtered.map((c) => {
                 const inSearch = isAlreadyInSearch(c);
                 const isSelected = selectedIds.has(c.id);
+                const isParsing = c.status === "uploaded" || c.status === "processing";
 
                 return (
                   <div
                     key={c.id}
                     className={`flex items-start gap-3 p-3 rounded-xl border transition ${
-                      inSearch
+                      inSearch || isParsing
                         ? "border-zinc-100 dark:border-zinc-900 bg-zinc-50/40 dark:bg-zinc-950/20 opacity-60"
                         : isSelected
                         ? "border-violet-300 dark:border-violet-850 bg-violet-50/10 dark:bg-violet-950/5"
@@ -2311,10 +2313,10 @@ function ImportFromDirectoryModal({
                   >
                     <input
                       type="checkbox"
-                      disabled={inSearch}
+                      disabled={inSearch || isParsing}
                       checked={isSelected || inSearch}
                       onChange={() => {
-                        if (!inSearch) onToggleSelect(c.id);
+                        if (!inSearch && !isParsing) onToggleSelect(c.id);
                       }}
                       className="mt-1 h-4 w-4 rounded border-zinc-300 dark:border-zinc-850 text-violet-600 focus:ring-violet-500 cursor-pointer disabled:cursor-not-allowed"
                     />
@@ -2329,11 +2331,19 @@ function ImportFromDirectoryModal({
                             {c.original_filename}
                           </p>
                         </div>
-                        {inSearch && (
+                        {inSearch ? (
                           <span className="rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-500 dark:text-zinc-400">
                             Already in Campaign
                           </span>
-                        )}
+                        ) : isParsing ? (
+                          <span className="inline-flex items-center gap-1 rounded bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400">
+                            <svg className="h-3 w-3 animate-spin text-blue-500" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            </svg>
+                            Parsing...
+                          </span>
+                        ) : null}
                       </div>
 
                       {/* Small metadata block */}

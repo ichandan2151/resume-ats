@@ -156,6 +156,11 @@ export async function POST(
         continue;
       }
 
+      // Enforce that only fully processed/parsed resumes can be imported
+      if (srcResume.status === "uploaded" || srcResume.status === "processing" || !srcResume.extracted_text) {
+        continue;
+      }
+
       // 2) Check for duplicates already in this search campaign
       let hasDuplicate = false;
       const email = srcResume.email?.trim().toLowerCase();
