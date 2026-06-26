@@ -3,7 +3,7 @@ import JSZip from "jszip";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { scoreResume } from "@/lib/parse";
-import { parseResumeWithOpenAI } from "@/lib/openai";
+import { parseResumeWithOpenAI, extractKeywordsFromJobDescription, calculateMatchScore } from "@/lib/openai";
 import { extractText } from "@/lib/extract";
 import { lookup } from "mime-types";
 
@@ -103,8 +103,8 @@ export async function processResumeBackground(
   );
 
   try {
-    // 3) fetch job context for Gemini
-    let jobContext = "Not provided";
+    // 1) Fetch job keywords if jobId is present
+    let jobKeywords: string[] = [];
     if (jobId) {
       const { data: jobData } = await supabaseAdmin
         .from("jobs")
@@ -112,18 +112,31 @@ export async function processResumeBackground(
         .eq("id", jobId)
         .single();
 
-      if (jobData) {
-        jobContext = `Title: ${jobData.title || "Unknown"}\nDescription: ${
-          jobData.description || "Not provided"
-        }`;
+      if (jobData && jobData.description) {
+        const parts = jobData.description.split("---KEYWORDS---");
+        if (parts.length > 1) {
+          try {
+            jobKeywords = JSON.parse(parts[1].trim());
+          } catch (e) {
+            console.error("Failed to parse existing job keywords:", e);
+          }
+        } else {
+          // Dynamic keyword extraction if missing (self-heal)
+          jobKeywords = await extractKeywordsFromJobDescription(`Title: ${jobData.title || ""}\nDescription: ${jobData.description}`);
+          const enrichedDesc = `${jobData.description}\n\n---KEYWORDS---\n${JSON.stringify(jobKeywords)}`;
+          await supabaseAdmin
+            .from("jobs")
+            .update({ description: enrichedDesc })
+            .eq("id", jobId);
+        }
       }
     }
 
-    // 4) parse + score via Gemini
+    // 2) Parse candidate resume with OpenAI (WITHOUT job context evaluation)
     const raw = await extractText(fileName, mimeType, bytes);
     const extracted_text = cleanText(raw);
 
-    const openaiResult = await parseResumeWithOpenAI(extracted_text, jobContext);
+    const openaiResult = await parseResumeWithOpenAI(extracted_text, "Not provided");
 
     if (!openaiResult.success) {
       // Store the structured error for the frontend
@@ -146,11 +159,37 @@ export async function processResumeBackground(
 
     const openaiData = openaiResult.data;
 
-    const finalScore = openaiData.scoring?.score ?? 0;
-    const finalBreakdown = openaiData.scoring?.breakdown ?? {
-      relevance: "Scoring failed",
-      strengths: [],
-      weaknesses: [],
+    // 3) Compute score programmatically if jobId exists
+    let finalScore = null;
+    let finalBreakdown = {};
+
+    if (jobId) {
+      const candidateKeywords = [
+        ...(openaiData.keywords || openaiData.skills || [])
+      ].map((k: any) => String(k).toLowerCase().trim());
+
+      const { score, matched, missing } = calculateMatchScore(
+        jobKeywords,
+        candidateKeywords,
+        openaiData.years_experience
+      );
+      
+      finalScore = score;
+      finalBreakdown = {
+        relevance: `Matched ${matched.length} out of ${jobKeywords.length} job keywords.`,
+        strengths: matched,
+        weaknesses: missing,
+      };
+    }
+
+    const updatedParsed = {
+      ...(openaiData || {}),
+      scoring: jobId
+        ? {
+            score: finalScore,
+            breakdown: finalBreakdown,
+          }
+        : undefined,
     };
 
     const { error: updErr } = await supabaseAdmin
@@ -163,10 +202,10 @@ export async function processResumeBackground(
         email: openaiData.email,
         phone: openaiData.phone,
         status: "scored",
-        score: jobId ? finalScore : null,
-        score_breakdown: jobId ? finalBreakdown : {},
-        scoring_version: "openai-1.0",
-        parsed_json: openaiData,
+        score: finalScore,
+        score_breakdown: finalBreakdown,
+        scoring_version: "keyword-1.0",
+        parsed_json: updatedParsed,
       })
       .eq("id", id);
 

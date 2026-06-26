@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { analyzeResumeBackground } from "@/app/api/search-candidate/[id]/resumes/import/route";
+import { extractKeywordsFromJobDescription, calculateMatchScore } from "@/lib/openai";
 
 export const runtime = "nodejs";
 
@@ -22,27 +22,49 @@ export async function GET() {
   // Fetch resumes for current user to compute stats
   const { data: resumes, error: resErr } = await supabase
     .from("resumes")
-    .select("job_id, score");
+    .select("job_id, score, created_at, status")
+    .eq("owner_id", auth.user.id);
 
   if (resErr)
     return NextResponse.json({ error: resErr.message }, { status: 500 });
+
+  const resumesByJob = new Map<string, any[]>();
+  for (const r of resumes ?? []) {
+    const jobId = r.job_id as string | null;
+    if (!jobId) continue;
+    if (!resumesByJob.has(jobId)) {
+      resumesByJob.set(jobId, []);
+    }
+    resumesByJob.get(jobId)!.push(r);
+  }
 
   const statsByJob = new Map<
     string,
     { count: number; sum: number; max: number }
   >();
-  for (const r of resumes ?? []) {
-    const jobId = r.job_id as string | null;
-    if (!jobId) continue;
-    const s = typeof r.score === "number" ? r.score : null;
 
-    const cur = statsByJob.get(jobId) ?? { count: 0, sum: 0, max: -Infinity };
-    cur.count += 1;
-    if (s != null) {
-      cur.sum += s;
-      cur.max = Math.max(cur.max, s);
+  for (const [jobId, list] of resumesByJob.entries()) {
+    // Sort descending by score, then created_at
+    const sorted = list.sort((a, b) => {
+      const scoreA = typeof a.score === "number" ? a.score : -1;
+      const scoreB = typeof b.score === "number" ? b.score : -1;
+      if (scoreB !== scoreA) return scoreB - scoreA;
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+
+    // Calculate dashboard stats using all matching candidates
+    const allCandidates = sorted;
+    const count = allCandidates.length;
+    let sum = 0;
+    let max = -Infinity;
+    for (const r of allCandidates) {
+      const s = typeof r.score === "number" ? r.score : null;
+      if (s != null) {
+        sum += s;
+        max = Math.max(max, s);
+      }
     }
-    statsByJob.set(jobId, cur);
+    statsByJob.set(jobId, { count, sum, max });
   }
 
   const enriched = (jobs ?? []).map((j) => {
@@ -86,6 +108,10 @@ export async function POST(req: Request) {
     );
   }
 
+  // 1) Extract job keywords and enrich job description
+  const jobKeywords = await extractKeywordsFromJobDescription(`Title: ${title}\nDescription: ${description}`);
+  const descriptionWithKeywords = `${description}\n\n---KEYWORDS---\n${JSON.stringify(jobKeywords)}`;
+
   const { data, error } = await supabase
     .from("jobs")
     .insert({
@@ -93,7 +119,7 @@ export async function POST(req: Request) {
       title,
       company: String(body?.company ?? "").trim() || null,
       location: String(body?.location ?? "").trim() || null,
-      description,
+      description: descriptionWithKeywords,
     })
     .select("id")
     .single();
@@ -103,7 +129,7 @@ export async function POST(req: Request) {
 
   const jobId = data.id;
 
-  // Fetch all candidate resumes belonging to the user that are in the Candidate Directory
+  // 2) Fetch all candidate resumes in the Candidate Directory
   const { data: candidates, error: candErr } = await supabase
     .from("resumes")
     .select("*")
@@ -147,50 +173,61 @@ export async function POST(req: Request) {
       }
     }
 
-    // Import each unique candidate to the newly created search campaign
-    let index = 0;
-    for (const srcResume of uniqueCandidates) {
-      const { data: newRow, error: insErr } = await supabase
+    // 3) Perform programmatic keyword matching and prepare bulk inserts
+    const rowsToInsert = uniqueCandidates.map((srcResume) => {
+      const candidateKeywords = [
+        ...(srcResume.parsed_json?.keywords || srcResume.parsed_json?.skills || [])
+      ].map((k: any) => String(k).toLowerCase().trim());
+
+      const { score, matched, missing } = calculateMatchScore(
+        jobKeywords,
+        candidateKeywords,
+        srcResume.parsed_json?.years_experience
+      );
+
+      const score_breakdown = {
+        relevance: `Matched ${matched.length} out of ${jobKeywords.length} job keywords.`,
+        strengths: matched,
+        weaknesses: missing,
+      };
+
+      const updatedParsed = {
+        ...(srcResume.parsed_json || {}),
+        scoring: {
+          score,
+          breakdown: score_breakdown,
+        },
+      };
+
+      return {
+        owner_id: auth.user.id,
+        job_id: jobId,
+        source: srcResume.source || "upload",
+        original_filename: srcResume.original_filename,
+        storage_bucket: srcResume.storage_bucket,
+        storage_path: srcResume.storage_path,
+        mime_type: srcResume.mime_type,
+        file_size_bytes: srcResume.file_size_bytes,
+        full_name: srcResume.full_name,
+        email: srcResume.email,
+        phone: srcResume.phone,
+        location: srcResume.location,
+        extracted_text: srcResume.extracted_text,
+        parsed_json: updatedParsed,
+        status: "scored",
+        score,
+        score_breakdown,
+        scoring_version: "keyword-1.0",
+      };
+    });
+
+    if (rowsToInsert.length > 0) {
+      const { error: insErr } = await supabase
         .from("resumes")
-        .insert({
-          owner_id: auth.user.id,
-          job_id: jobId,
-          source: srcResume.source || "upload",
-          original_filename: srcResume.original_filename,
-          storage_bucket: srcResume.storage_bucket,
-          storage_path: srcResume.storage_path,
-          mime_type: srcResume.mime_type,
-          file_size_bytes: srcResume.file_size_bytes,
-          full_name: srcResume.full_name,
-          email: srcResume.email,
-          phone: srcResume.phone,
-          location: srcResume.location,
-          extracted_text: srcResume.extracted_text,
-          parsed_json: srcResume.parsed_json,
-          status: "uploaded",
-        })
-        .select("id")
-        .single();
-
-      if (insErr || !newRow) {
-        continue;
+        .insert(rowsToInsert);
+      if (insErr) {
+        console.error("Failed to bulk insert matched candidates:", insErr.message);
       }
-
-      // Fire and forget scoring in the background with a 10s staggering delay
-      const delayMs = index * 10000;
-      setTimeout(() => {
-        analyzeResumeBackground(
-          auth.user.id,
-          jobId,
-          newRow.id,
-          srcResume.extracted_text || "",
-          srcResume.original_filename,
-        ).catch((err) => {
-          console.error("Failed to analyze resume background in search creation flow:", err);
-        });
-      }, delayMs);
-
-      index++;
     }
   }
 

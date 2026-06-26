@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import React, { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 const formatVisaStatus = (status: string) => {
   if (!status) return "";
@@ -253,11 +253,13 @@ export default function SearchCandidateClient({ id }: { id: string }) {
   type SortDirection = "asc" | "desc";
   const [sortField, setSortField] = useState<SortField>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [displayLimit, setDisplayLimit] = useState<5 | 10 | 20 | "all">("all");
+  const [copyPopupCandidate, setCopyPopupCandidate] = useState<ResumeRow | null>(null);
 
   const total = totalCount;
   const avgScore = serverAvgScore;
 
-  const sortedRows = rows;
+  const sortedRows = displayLimit === "all" ? rows : rows.slice(0, displayLimit);
 
   async function loadSearchCandidate() {
     const res = await fetch(`/api/search-candidate/${id}`);
@@ -501,7 +503,7 @@ export default function SearchCandidateClient({ id }: { id: string }) {
         )}
 
         {/* Candidates table */}
-        <div id="tour-searchCandidate-table" className="mt-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/20 shadow-sm dark:shadow-none overflow-hidden">
+        <div id="tour-searchCandidate-table" className="mt-6 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm dark:shadow-none overflow-hidden bg-zinc-50/20 dark:bg-zinc-900/10">
           <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 px-5 py-4">
             <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
               Candidates
@@ -683,36 +685,19 @@ export default function SearchCandidateClient({ id }: { id: string }) {
                       </button>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-3">
-                      <span className="font-semibold uppercase tracking-wide">Sort:</span>
-                      <button
-                        onClick={() => {
-                          if (sortField === "score") {
-                            if (sortDirection === "asc") setSortDirection("desc");
-                            else setSortField(null);
-                          } else {
-                            setSortField("score");
-                            setSortDirection("desc");
-                          }
-                        }}
-                        className={`flex items-center gap-1 rounded-lg px-2.5 py-1 font-semibold transition cursor-pointer ${sortField === "score" ? "bg-zinc-200 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100" : "hover:bg-zinc-100 dark:hover:bg-zinc-900/40"}`}
-                      >
-                        Score {sortField === "score" ? (sortDirection === "asc" ? "↑" : "↓") : "⇅"}
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (sortField === "status") {
-                            if (sortDirection === "asc") setSortDirection("desc");
-                            else setSortField(null);
-                          } else {
-                            setSortField("status");
-                            setSortDirection("desc");
-                          }
-                        }}
-                        className={`flex items-center gap-1 rounded-lg px-2.5 py-1 font-semibold transition cursor-pointer ${sortField === "status" ? "bg-zinc-200 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100" : "hover:bg-zinc-100 dark:hover:bg-zinc-900/40"}`}
-                      >
-                        Status {sortField === "status" ? (sortDirection === "asc" ? "↑" : "↓") : "⇅"}
-                      </button>
+                    <div className="flex flex-wrap items-center gap-6">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Show:</span>
+                        {([5, 10, 20, "all"] as const).map((opt) => (
+                          <button
+                            key={opt}
+                            onClick={() => setDisplayLimit(opt)}
+                            className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition cursor-pointer ${displayLimit === opt ? "bg-violet-100 dark:bg-violet-950 text-violet-750 dark:text-violet-300 ring-1 ring-inset ring-violet-700/10" : "hover:bg-zinc-100 dark:hover:bg-zinc-900/40 text-zinc-600 dark:text-zinc-400"}`}
+                          >
+                            {opt === "all" ? "All" : `Top ${opt}`}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -729,477 +714,32 @@ export default function SearchCandidateClient({ id }: { id: string }) {
               </div>
 
               {/* Card list */}
-              <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                {sortedRows.map((r) => (
-                  <Fragment key={r.id}>
-                    <div className={`px-5 py-4 hover:bg-zinc-50 dark:hover:bg-zinc-900/20 transition-colors flex items-start gap-4 ${selectedSearchResumeIds.has(r.id) ? "bg-violet-50/20 dark:bg-violet-950/5" : ""}`}>
-                      <input
-                        type="checkbox"
-                        checked={selectedSearchResumeIds.has(r.id)}
-                        onChange={() => {
-                          setSelectedSearchResumeIds((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(r.id)) next.delete(r.id);
-                            else next.add(r.id);
-                            return next;
-                          });
-                        }}
-                        className="mt-1 h-3.5 w-3.5 rounded border-zinc-300 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-violet-600 focus:ring-violet-500 cursor-pointer flex-shrink-0"
-                      />
-                      <div className="flex-1 min-w-0">
-                      {/* Top row: name + score + status */}
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="font-semibold text-zinc-800 dark:text-zinc-200 truncate">
-                            {r.full_name ?? "Unknown name"}
-                          </div>
-                          <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate mt-0.5">
-                            {r.original_filename}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <ScorePill score={r.score} />
-                          {/* Status badge */}
-                          {r.status === "uploaded" ? (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider text-blue-600 dark:text-blue-400">
-                              <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                              </svg>
-                              Processing
-                            </span>
-                          ) : (r.status === "failed" || r.status === "error") ? (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/40 px-2.5 py-1 text-xs font-semibold text-red-600 dark:text-red-400">
-                              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                              </svg>
-                              Failed
-                            </span>
-                          ) : (
-                            <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
-                              r.status === "scored"
-                                ? "border-emerald-200 dark:border-emerald-900/50 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400"
-                                : "border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-950/40 text-zinc-600 dark:text-zinc-300"
-                            }`}>
-                              {r.status}
-                            </span>
-                          )}
-                        </div>
-                      </div>
+              <div className="flex flex-col gap-4 p-5 bg-zinc-50/50 dark:bg-zinc-950/30 overflow-visible [content-visibility:auto]">
+                {sortedRows.map((r, idx) => (
+                  <CandidateCardModern
+                    key={r.id}
+                    candidate={r}
+                    idx={idx}
+                    isSelected={selectedSearchResumeIds.has(r.id)}
+                    isExpanded={expandedRow === r.id}
+                    isRetrying={retryingIds.has(r.id)}
+                    onToggleSelect={(id) => {
+                      setSelectedSearchResumeIds((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(id)) next.delete(id);
+                        else next.add(id);
+                        return next;
+                      });
+                    }}
+                    onToggleExpand={(id) => {
+                      setExpandedRow((prev) => (prev === id ? null : id));
+                    }}
+                    onRetry={retryResume}
+                    onShowCopyPopup={setCopyPopupCandidate}
+                  />
+                ))}
+              </div>
 
-                      {/* Middle row: contact + badges */}
-                      <div className="mt-2.5 flex flex-wrap items-center gap-2 text-xs">
-                        {r.email && (
-                          <span className="text-zinc-500 dark:text-zinc-400">{r.email}</span>
-                        )}
-                        {r.phone && (
-                          <span className="text-zinc-400 dark:text-zinc-500">{r.phone}</span>
-                        )}
-                        {r.parsed_json?.candidate_location && (
-                          <span className="rounded-md bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 px-1.5 py-0.5 text-zinc-700 dark:text-zinc-300">
-                            📍 {r.parsed_json.candidate_location}
-                          </span>
-                        )}
-                        {r.parsed_json?.years_experience != null && r.parsed_json.years_experience > 0 && (
-                          <span className="rounded-md bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 px-1.5 py-0.5 text-zinc-700 dark:text-zinc-300">
-                            {r.parsed_json.years_experience}y exp
-                          </span>
-                        )}
-                        {r.parsed_json?.visa_status && (
-                          <span className="rounded-md bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 px-1.5 py-0.5 text-blue-700 dark:text-blue-300">
-                            {formatVisaStatus(r.parsed_json.visa_status)}
-                          </span>
-                        )}
-                        {r.parsed_json?.work_authorization && (
-                          <span className="rounded-md bg-indigo-50 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-800 px-1.5 py-0.5 text-indigo-700 dark:text-indigo-300">
-                            {r.parsed_json.work_authorization}
-                          </span>
-                        )}
-                        {r.parsed_json?.error_code && (
-                          <span className="rounded-md bg-red-50 dark:bg-red-900/20 px-1.5 py-0.5 text-red-600 dark:text-red-400 font-mono border border-red-200 dark:border-red-900/30">
-                            {r.parsed_json.error_code}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Bottom row: date + actions */}
-                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-xs text-zinc-400 dark:text-zinc-500">
-                          Uploaded {new Date(r.created_at).toLocaleString()}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            onClick={() => setExpandedRow(expandedRow === r.id ? null : r.id)}
-                            disabled={r.status === "uploaded"}
-                            className="flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                          >
-                            {expandedRow === r.id ? "Hide details" : "Show details"}
-                            <svg className={`w-3 h-3 transition-transform ${expandedRow === r.id ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                            </svg>
-                          </button>
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              onClick={() => { setEditCandidate(r); setEditOpen(true); }}
-                              disabled={r.status === "uploaded"}
-                              className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-                            >
-                              Edit
-                            </button>
-                            <a
-                              href={`/api/resumes/${r.id}/view`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className={`rounded-lg border px-2.5 py-1 text-xs font-semibold ${
-                                r.status === "uploaded"
-                                  ? "border-zinc-200 dark:border-zinc-800 bg-zinc-100/50 dark:bg-zinc-800/50 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
-                                  : "border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-900/60"
-                              }`}
-                              onClick={(e) => { if (r.status === "uploaded") e.preventDefault(); }}
-                            >
-                              View
-                            </a>
-                            {r.status !== "uploaded" && (
-                              <button
-                                onClick={() => retryResume(r.id)}
-                                disabled={retryingIds.has(r.id)}
-                                className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/40 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/60 disabled:opacity-50 cursor-pointer"
-                                title={r.status === "failed" || r.status === "error" ? "Retry parsing this candidate" : "Re-score and re-parse this candidate"}
-                              >
-                                {retryingIds.has(r.id)
-                                  ? "Retrying..."
-                                  : (r.status === "failed" || r.status === "error" ? "Retry" : "Rerun")}
-                              </button>
-                            )}
-                            <button
-                              onClick={() => { setDeleteCandidate(r); setDeleteOpen(true); }}
-                              disabled={r.status === "uploaded"}
-                              className="rounded-lg border border-red-200 dark:border-red-800/60 bg-red-50 dark:bg-red-900/40 px-2.5 py-1 text-xs font-semibold text-red-600 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/60 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                    {/* Error detail panel */}
-                    {(r.status === "failed" || r.status === "error") && r.parsed_json?.error && expandedRow === r.id && (
-                      <div className="border-t border-red-100 dark:border-red-900/30 bg-red-50/50 dark:bg-red-950/10 px-5 py-4">
-                        <div className="border-l-2 border-red-400 dark:border-red-900/50 pl-4">
-                          <div className="rounded-xl border border-red-200 dark:border-red-900/30 bg-white dark:bg-red-950/20 p-4">
-                            <div className="flex items-start gap-3">
-                              <div className="mt-0.5 rounded-lg bg-red-100 dark:bg-red-900/30 p-1.5">
-                                <svg className="h-4 w-4 text-red-500 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                                </svg>
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <h4 className="text-sm font-semibold text-red-700 dark:text-red-300">Parsing Failed</h4>
-                                  {r.parsed_json.error_code && (
-                                    <span className="rounded bg-red-100 dark:bg-red-900/40 px-1.5 py-0.5 text-[10px] font-mono text-red-600 dark:text-red-300/80">
-                                      {r.parsed_json.error_code}
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed">{r.parsed_json.error}</p>
-                                <button
-                                  onClick={() => retryResume(r.id)}
-                                  disabled={retryingIds.has(r.id)}
-                                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-amber-100 dark:bg-amber-900/40 border border-amber-200 dark:border-amber-800 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-900/60 disabled:opacity-50 transition-colors"
-                                >
-                                  <svg className={`h-3.5 w-3.5 ${retryingIds.has(r.id) ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                  </svg>
-                                  {retryingIds.has(r.id) ? "Retrying..." : "Retry Parsing"}
-                                </button>
-                                {!r.parsed_json.retryable && (
-                                  <p className="mt-2 text-xs text-zinc-500">Note: If you have corrected the configuration/API key error, click Retry Parsing above to attempt parsing again.</p>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Detail panel for scored candidates */}
-                    {expandedRow === r.id && r.status !== "failed" && r.status !== "error" && (
-                      <div className="border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/10 px-5 py-0">
-                        <div className="border-l border-zinc-200 dark:border-zinc-800 pl-6 py-6 space-y-6">
-                              {/* Gemini Scoring Breakdown */}
-                              {r.parsed_json?.scoring?.breakdown && (
-                                <div className="mb-6 bg-blue-50/50 dark:bg-blue-900/10 rounded-lg p-5 border border-blue-200 dark:border-blue-900/20 shadow-sm dark:shadow-none">
-                                  <h4 className="text-sm font-semibold text-blue-700 dark:text-blue-400 flex items-center gap-2 mb-3">
-                                    <svg
-                                      className="w-4 h-4"
-                                      fill="none"
-                                      viewBox="0 0 24 24"
-                                      stroke="currentColor"
-                                    >
-                                      <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M13 10V3L4 14h7v7l9-11h-7z"
-                                      />
-                                    </svg>
-                                    AI Scoring Analysis - {r.score}/100
-                                  </h4>
-
-                                  {r.parsed_json.scoring.breakdown
-                                    .relevance && (
-                                    <p className="text-sm text-zinc-700 dark:text-zinc-300 mb-4 leading-relaxed">
-                                      {
-                                        r.parsed_json.scoring.breakdown
-                                          .relevance
-                                      }
-                                    </p>
-                                  )}
-
-                                  <div className="grid md:grid-cols-2 gap-4 text-sm mt-4">
-                                    {r.parsed_json.scoring.breakdown.strengths
-                                      ?.length > 0 && (
-                                      <div>
-                                        <h5 className="font-semibold text-emerald-700 dark:text-emerald-400 mb-2">
-                                          Strengths
-                                        </h5>
-                                        <ul className="list-disc list-inside space-y-1 text-zinc-600 dark:text-zinc-400 text-xs">
-                                          {r.parsed_json.scoring.breakdown.strengths.map(
-                                            (s: string, i: number) => (
-                                              <li key={i}>{s}</li>
-                                            ),
-                                          )}
-                                        </ul>
-                                      </div>
-                                    )}
-
-                                    {r.parsed_json.scoring.breakdown.weaknesses
-                                      ?.length > 0 && (
-                                      <div>
-                                        <h5 className="font-semibold text-rose-700 dark:text-rose-400 mb-2">
-                                          Weaknesses / Missing
-                                        </h5>
-                                        <ul className="list-disc list-inside space-y-1 text-zinc-600 dark:text-zinc-400 text-xs">
-                                          {r.parsed_json.scoring.breakdown.weaknesses.map(
-                                            (w: string, i: number) => (
-                                              <li key={i}>{w}</li>
-                                            ),
-                                          )}
-                                        </ul>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* Summary */}
-                              {r.parsed_json?.summary && (
-                                <div>
-                                  <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
-                                    Summary
-                                  </h4>
-                                  <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed max-w-3xl">
-                                    {r.parsed_json.summary}
-                                  </p>
-                                </div>
-                              )}
-
-                              {/* Experience */}
-                              {r.parsed_json?.experience?.length > 0 && (
-                                <div>
-                                  <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
-                                    Experience
-                                  </h4>
-                                  <div className="grid gap-4 md:grid-cols-2">
-                                    {r.parsed_json.experience.map(
-                                      (exp: any, i: number) => (
-                                        <div
-                                          key={i}
-                                          className="bg-zinc-50/80 dark:bg-zinc-900/40 rounded-lg p-4 border border-zinc-200 dark:border-zinc-800/50 shadow-sm dark:shadow-none"
-                                        >
-                                          <div className="font-medium text-zinc-800 dark:text-zinc-200">
-                                            {exp.role || "Role"}
-                                          </div>
-                                          <div className="text-sm text-blue-600 dark:text-blue-400 font-semibold">
-                                            {exp.company || "Company"}
-                                          </div>
-                                          <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                                            {exp.duration}
-                                          </div>
-                                          {exp.description && (
-                                            <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-2 leading-relaxed">
-                                              {exp.description}
-                                            </p>
-                                          )}
-                                        </div>
-                                      ),
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* Projects */}
-                              {r.parsed_json?.projects?.length > 0 && (
-                                <div>
-                                  <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
-                                    Projects
-                                  </h4>
-                                  <div className="grid gap-4 md:grid-cols-2">
-                                    {r.parsed_json.projects.map(
-                                      (proj: any, i: number) => (
-                                        <div
-                                          key={i}
-                                          className="bg-zinc-50/80 dark:bg-zinc-900/40 rounded-lg p-4 border border-zinc-200 dark:border-zinc-800/50 shadow-sm dark:shadow-none"
-                                        >
-                                          <div className="font-medium text-zinc-800 dark:text-zinc-200">
-                                            {proj.name || "Project"}
-                                          </div>
-                                          <div className="flex flex-wrap gap-1 mt-2 mb-2">
-                                            {proj.tech_stack?.map(
-                                              (t: string, ti: number) => (
-                                                <span
-                                                  key={ti}
-                                                  className="text-[10px] uppercase bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 px-1.5 py-0.5 rounded font-medium"
-                                                >
-                                                  {t}
-                                                </span>
-                                              ),
-                                            )}
-                                          </div>
-                                          {proj.description && (
-                                            <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
-                                              {proj.description}
-                                            </p>
-                                          )}
-                                        </div>
-                                      ),
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* Education & Certs */}
-                              <div className="grid gap-6 md:grid-cols-2">
-                                {r.parsed_json?.education?.length > 0 && (
-                                  <div>
-                                    <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
-                                      Education
-                                    </h4>
-                                    <div className="space-y-2">
-                                      {r.parsed_json.education.map(
-                                        (edu: any, i: number) => (
-                                          <div
-                                            key={i}
-                                            className="bg-zinc-50/80 dark:bg-zinc-900/40 rounded-lg p-3 border border-zinc-200 dark:border-zinc-800/50 flex justify-between items-start shadow-sm dark:shadow-none"
-                                          >
-                                            <div>
-                                              <div className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-                                                {edu.degree}
-                                              </div>
-                                              <div className="text-xs text-zinc-600 dark:text-zinc-400">
-                                                {edu.school}
-                                              </div>
-                                            </div>
-                                            <div className="text-xs text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
-                                              {edu.year}
-                                            </div>
-                                          </div>
-                                        ),
-                                      )}
-                                    </div>
-                                  </div>
-                                )}
-
-                                <div>
-                                  {/* Certifications */}
-                                  {r.parsed_json?.certifications?.length >
-                                    0 && (
-                                    <div className="mb-6">
-                                      <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
-                                        Certifications
-                                      </h4>
-                                      <div className="space-y-2">
-                                        {r.parsed_json.certifications.map(
-                                          (cert: any, i: number) => (
-                                            <div
-                                              key={i}
-                                              className="flex justify-between items-center text-sm"
-                                            >
-                                              <span className="text-zinc-700 dark:text-zinc-300">
-                                                {cert.name}
-                                              </span>
-                                              <span className="text-zinc-500 dark:text-zinc-400 text-xs">
-                                                {cert.issuer}{" "}
-                                                {cert.year
-                                                  ? `(${cert.year})`
-                                                  : ""}
-                                              </span>
-                                            </div>
-                                          ),
-                                        )}
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  {/* Publications */}
-                                  {r.parsed_json?.publications?.length > 0 && (
-                                    <div className="mt-6">
-                                      <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
-                                        Publications
-                                      </h4>
-                                      <ul className="space-y-2">
-                                        {r.parsed_json.publications.map(
-                                          (pub: any, i: number) => (
-                                            <li key={i} className="text-sm">
-                                              <a
-                                                href={pub.link || "#"}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                                              >
-                                                {pub.title}
-                                              </a>
-                                              <span className="text-zinc-500 dark:text-zinc-400 text-xs ml-2">
-                                                {pub.year}
-                                              </span>
-                                            </li>
-                                          ),
-                                        )}
-                                      </ul>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Skills Tag Cloud */}
-                              {r.parsed_json?.skills?.length > 0 && (
-                                <div>
-                                  <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
-                                    Skills
-                                  </h4>
-                                  <div className="flex flex-wrap gap-1">
-                                    {r.parsed_json.skills.map(
-                                      (skill: string, i: number) => (
-                                        <span
-                                          key={i}
-                                          className="text-xs bg-zinc-100 dark:bg-zinc-800/60 text-zinc-700 dark:text-zinc-300 px-2 py-1 rounded-md border border-zinc-200 dark:border-zinc-700/50 shadow-sm dark:shadow-none"
-                                        >
-                                          {skill}
-                                        </span>
-                                      ),
-                                    )}
-                                   </div>
-                                 </div>
-                               )}
-                             </div>
-                           </div>
-                       )}
-                     </Fragment>
-                   ))}
-                 </div>
             {/* Pagination Toolbar */}
             {totalPages > 1 && (
               <div className="flex items-center justify-between border-t border-zinc-200 dark:border-zinc-800 px-5 py-4 text-sm bg-zinc-50 dark:bg-zinc-950/20">
@@ -1414,6 +954,13 @@ export default function SearchCandidateClient({ id }: { id: string }) {
               </div>
             </div>
           </div>
+        )}
+        {copyPopupCandidate && (
+          <CopyContactModal
+            open={!!copyPopupCandidate}
+            onClose={() => setCopyPopupCandidate(null)}
+            candidate={copyPopupCandidate}
+          />
         )}
         </>
         )}
@@ -1798,9 +1345,38 @@ function SearchDetailsModal(props: {
                 Description
               </div>
               <div className="mt-2 whitespace-pre-wrap text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
-                {searchCandidate.description}
+                {searchCandidate.description.split("---KEYWORDS---")[0].trim()}
               </div>
             </div>
+
+            {(() => {
+              const parts = searchCandidate.description.split("---KEYWORDS---");
+              if (parts.length > 1) {
+                try {
+                  const kw = JSON.parse(parts[1].trim());
+                  if (Array.isArray(kw) && kw.length > 0) {
+                    return (
+                      <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/20 p-4 shadow-sm dark:shadow-none mt-4">
+                        <div className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-2">
+                          Extracted Keywords
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {kw.map((k) => (
+                            <span
+                              key={k}
+                              className="inline-flex items-center rounded-md bg-violet-50 dark:bg-violet-950 px-2 py-0.5 text-xs font-medium text-violet-750 dark:text-violet-300 ring-1 ring-inset ring-violet-750/10"
+                            >
+                              {k}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  }
+                } catch (e) {}
+              }
+              return null;
+            })()}
 
             <div className="text-xs text-zinc-500">
               Created: {new Date(searchCandidate.created_at).toLocaleString()}
@@ -2416,3 +1992,662 @@ function ImportFromDirectoryModal({
     </div>
   );
 }
+
+type CandidateCardProps = {
+  candidate: ResumeRow;
+  idx: number;
+  isSelected: boolean;
+  isExpanded: boolean;
+  isRetrying: boolean;
+  onToggleSelect: (id: string) => void;
+  onToggleExpand: (id: string) => void;
+  onRetry: (id: string) => void;
+  onShowCopyPopup: (candidate: ResumeRow) => void;
+};
+
+const MatchDetails = React.memo(({ candidate, isExpanded, isRetrying, onRetry }: { candidate: ResumeRow; isExpanded: boolean; isRetrying: boolean; onRetry: (id: string) => void }) => {
+  if (!isExpanded) return null;
+
+  const r = candidate;
+  return (
+    <>
+      {/* Error detail panel */}
+      {(r.status === "failed" || r.status === "error") && r.parsed_json?.error && (
+        <div className="border-t border-red-100 dark:border-red-900/30 bg-red-50/50 dark:bg-red-950/10 px-5 py-4">
+          <div className="border-l-2 border-red-400 dark:border-red-900/50 pl-4">
+            <div className="rounded-xl border border-red-200 dark:border-red-900/30 bg-white dark:bg-red-950/20 p-4">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 rounded-lg bg-red-100 dark:bg-red-900/30 p-1.5 flex-shrink-0">
+                  <svg className="h-4 w-4 text-red-500 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="text-sm font-semibold text-red-700 dark:text-red-300">Parsing Failed</h4>
+                    {r.parsed_json.error_code && (
+                      <span className="rounded bg-red-100 dark:bg-red-900/40 px-1.5 py-0.5 text-[10px] font-mono text-red-600 dark:text-red-300/80">
+                        {r.parsed_json.error_code}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed">{r.parsed_json.error}</p>
+                  <button
+                    onClick={() => onRetry(r.id)}
+                    disabled={isRetrying}
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-amber-100 dark:bg-amber-900/40 border border-amber-200 dark:border-amber-800 px-3 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-900/60 disabled:opacity-50 transition-colors"
+                  >
+                    <svg className={`h-3.5 w-3.5 ${isRetrying ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    {isRetrying ? "Retrying..." : "Retry Parsing"}
+                  </button>
+                  {!r.parsed_json.retryable && (
+                    <p className="mt-2 text-xs text-zinc-500">Note: If you have corrected the configuration/API key error, click Retry Parsing above to attempt parsing again.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Detail panel for scored candidates */}
+      {r.status !== "failed" && r.status !== "error" && (
+        <div className="border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/10 px-5 py-0">
+          <div className="border-l border-zinc-200 dark:border-zinc-800 pl-6 py-6 space-y-6">
+                {/* Gemini Scoring Breakdown */}
+                {r.parsed_json?.scoring?.breakdown && (
+                  <div className="mb-6 bg-blue-50/50 dark:bg-blue-900/10 rounded-lg p-5 border border-blue-200 dark:border-blue-900/20 shadow-sm dark:shadow-none">
+                    <h4 className="text-sm font-semibold text-blue-700 dark:text-blue-400 flex items-center gap-2 mb-3">
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M13 10V3L4 14h7v7l9-11h-7z"
+                        />
+                      </svg>
+                      Keyword Match Analysis - {r.score}/100
+                    </h4>
+
+                    {r.parsed_json.scoring.breakdown.relevance && (
+                      <p className="text-sm text-zinc-700 dark:text-zinc-300 mb-4 leading-relaxed font-semibold">
+                        {r.parsed_json.scoring.breakdown.relevance}
+                      </p>
+                    )}
+
+                    <div className="grid md:grid-cols-2 gap-4 text-sm mt-4">
+                      {r.parsed_json.scoring.breakdown.strengths?.length > 0 && (
+                        <div>
+                          <h5 className="font-semibold text-emerald-700 dark:text-emerald-400 mb-2">
+                            Matched Keywords
+                          </h5>
+                          <ul className="list-disc list-inside space-y-1 text-zinc-600 dark:text-zinc-400 text-xs">
+                            {r.parsed_json.scoring.breakdown.strengths.map(
+                              (s: string, i: number) => (
+                                <li key={i}>{s}</li>
+                              ),
+                            )}
+                          </ul>
+                        </div>
+                      )}
+
+                      {r.parsed_json.scoring.breakdown.weaknesses?.length > 0 && (
+                        <div>
+                          <h5 className="font-semibold text-rose-750 dark:text-rose-450 mb-2">
+                            Missing Keywords
+                          </h5>
+                          <ul className="list-disc list-inside space-y-1 text-zinc-600 dark:text-zinc-400 text-xs">
+                            {r.parsed_json.scoring.breakdown.weaknesses.map(
+                              (w: string, i: number) => (
+                                <li key={i}>{w}</li>
+                              ),
+                            )}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Summary */}
+                {r.parsed_json?.summary && (
+                  <div>
+                    <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                      Summary
+                    </h4>
+                    <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed max-w-3xl">
+                      {r.parsed_json.summary}
+                    </p>
+                  </div>
+                )}
+
+                {/* Experience */}
+                {r.parsed_json?.experience?.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                      Experience
+                    </h4>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      {r.parsed_json.experience.map(
+                        (exp: any, i: number) => (
+                          <div
+                            key={i}
+                            className="bg-zinc-50/80 dark:bg-zinc-900/40 rounded-lg p-4 border border-zinc-200 dark:border-zinc-800/50 shadow-sm dark:shadow-none"
+                          >
+                            <div className="font-medium text-zinc-800 dark:text-zinc-200">
+                              {exp.role || "Role"}
+                            </div>
+                            <div className="text-sm text-blue-600 dark:text-blue-400 font-semibold">
+                              {exp.company || "Company"}
+                            </div>
+                            <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                              {exp.duration}
+                            </div>
+                            {exp.description && (
+                              <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-2 leading-relaxed">
+                                {exp.description}
+                              </p>
+                            )}
+                          </div>
+                        ),
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Projects */}
+                {r.parsed_json?.projects?.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                      Projects
+                    </h4>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      {r.parsed_json.projects.map(
+                        (proj: any, i: number) => (
+                          <div
+                            key={i}
+                            className="bg-zinc-50/80 dark:bg-zinc-900/40 rounded-lg p-4 border border-zinc-200 dark:border-zinc-800/50 shadow-sm dark:shadow-none"
+                          >
+                            <div className="font-medium text-zinc-800 dark:text-zinc-200">
+                              {proj.name || "Project"}
+                            </div>
+                            <div className="flex flex-wrap gap-1 mt-2 mb-2">
+                              {proj.tech_stack?.map(
+                                (t: string, ti: number) => (
+                                  <span
+                                    key={ti}
+                                    className="text-[10px] uppercase bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 px-1.5 py-0.5 rounded font-medium"
+                                  >
+                                    {t}
+                                  </span>
+                                ),
+                              )}
+                            </div>
+                            {proj.description && (
+                              <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                                {proj.description}
+                              </p>
+                            )}
+                          </div>
+                        ),
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Education & Certs */}
+                <div className="grid gap-6 md:grid-cols-2">
+                  {r.parsed_json?.education?.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                        Education
+                      </h4>
+                      <div className="space-y-2">
+                        {r.parsed_json.education.map(
+                          (edu: any, i: number) => (
+                            <div
+                              key={i}
+                              className="bg-zinc-50/80 dark:bg-zinc-900/40 rounded-lg p-3 border border-zinc-200 dark:border-zinc-800/50 flex justify-between items-start shadow-sm dark:shadow-none"
+                            >
+                              <div>
+                                <div className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                                  {edu.degree}
+                                </div>
+                                <div className="text-xs text-zinc-600 dark:text-zinc-400">
+                                  {edu.school}
+                                </div>
+                              </div>
+                              <div className="text-xs text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
+                                {edu.year}
+                              </div>
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    {/* Certifications */}
+                    {r.parsed_json?.certifications?.length > 0 && (
+                      <div className="mb-6">
+                        <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                          Certifications
+                        </h4>
+                        <div className="space-y-2">
+                          {r.parsed_json.certifications.map(
+                            (cert: any, i: number) => (
+                              <div
+                                key={i}
+                                className="flex justify-between items-center text-sm"
+                              >
+                                <span className="text-zinc-700 dark:text-zinc-300">
+                                  {cert.name}
+                                </span>
+                                <span className="text-zinc-500 dark:text-zinc-400 text-xs ml-2">
+                                  {cert.issuer}{" "}
+                                  {cert.year ? `(${cert.year})` : ""}
+                                </span>
+                              </div>
+                            ),
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Publications */}
+                    {r.parsed_json?.publications?.length > 0 && (
+                      <div className="mt-6">
+                        <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                          Publications
+                        </h4>
+                        <ul className="space-y-2">
+                          {r.parsed_json.publications.map(
+                            (pub: any, i: number) => (
+                              <li key={i} className="text-sm">
+                                <a
+                                  href={pub.link || "#"}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                                >
+                                  {pub.title}
+                                </a>
+                                <span className="text-zinc-500 dark:text-zinc-400 text-xs ml-2">
+                                  {pub.year}
+                                </span>
+                              </li>
+                            ),
+                          )}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Skills Tag Cloud */}
+                {r.parsed_json?.skills?.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                      Skills
+                    </h4>
+                    <div className="flex flex-wrap gap-1">
+                      {r.parsed_json.skills.map(
+                        (skill: string, i: number) => (
+                          <span
+                            key={i}
+                            className="text-xs bg-zinc-100 dark:bg-zinc-800/60 text-zinc-700 dark:text-zinc-300 px-2 py-1 rounded-md border border-zinc-200 dark:border-zinc-700/50 shadow-sm dark:shadow-none"
+                          >
+                            {skill}
+                          </span>
+                        ),
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+        </div>
+      )}
+    </>
+  );
+});
+
+MatchDetails.displayName = "MatchDetails";
+
+const CandidateCardModern = React.memo(({ candidate, idx, isSelected, isExpanded, isRetrying, onToggleSelect, onToggleExpand, onRetry, onShowCopyPopup }: CandidateCardProps) => {
+  const r = candidate;
+  return (
+    <div className="candidate-card-deferred card-modern" data-id={r.id}>
+      <div className={`p-5 rounded-2xl border border-zinc-250 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/70 backdrop-blur-sm shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 flex items-start gap-5 ${isSelected ? "ring-2 ring-violet-500 bg-violet-50/10 dark:bg-violet-950/5" : ""}`}>
+        {/* Checkbox */}
+        <div className="pt-1 flex-shrink-0">
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelect(r.id)}
+            className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-violet-600 focus:ring-violet-500 cursor-pointer"
+          />
+        </div>
+
+        {/* Score Indicator Ring */}
+        <div className="flex-shrink-0 relative flex items-center justify-center">
+          <svg className="w-14 h-14 transform -rotate-90">
+            <circle
+              cx="28"
+              cy="28"
+              r="24"
+              className="stroke-zinc-100 dark:stroke-zinc-800/60"
+              strokeWidth="4.5"
+              fill="transparent"
+            />
+            <circle
+              cx="28"
+              cy="28"
+              r="24"
+              className={
+                (r.score ?? 0) >= 70
+                  ? "stroke-emerald-500"
+                  : (r.score ?? 0) >= 40
+                  ? "stroke-amber-500"
+                  : "stroke-rose-500"
+              }
+              strokeWidth="4.5"
+              fill="transparent"
+              strokeDasharray="150.8"
+              strokeDashoffset={150.8 * (1 - (r.score ?? 0) / 100)}
+              strokeLinecap="round"
+            />
+          </svg>
+          <span className="absolute text-xs font-bold text-zinc-800 dark:text-zinc-200">
+            {r.score ?? 0}%
+          </span>
+        </div>
+
+        {/* Candidate Details */}
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-zinc-800 dark:text-zinc-100 flex items-center gap-2">
+                <span className="text-zinc-400 dark:text-zinc-500">#{idx + 1}</span>
+                {r.full_name ?? "Unknown name"}
+              </h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate mt-0.5 flex items-center gap-1">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                {r.original_filename}
+              </p>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              {/* Status Badge */}
+              {r.status === "uploaded" ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider text-blue-600 dark:text-blue-400">
+                  <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  Processing
+                </span>
+              ) : (r.status === "failed" || r.status === "error") ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/40 px-2.5 py-1 text-xs font-semibold text-red-650 dark:text-red-400">
+                  Failed
+                </span>
+              ) : null}
+            </div>
+          </div>
+
+          {/* Contact Info & Badges */}
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+            {r.email && (
+              <button
+                type="button"
+                onClick={() => onShowCopyPopup(r)}
+                className="flex items-center gap-1 rounded-lg bg-zinc-50 dark:bg-zinc-900 border border-zinc-250/60 dark:border-zinc-800 px-2 py-0.5 text-zinc-650 dark:text-zinc-350 hover:border-violet-400 hover:text-violet-600 dark:hover:text-violet-400 transition cursor-pointer font-medium"
+                title="Click to copy contact details"
+              >
+                ✉️ {r.email}
+              </button>
+            )}
+            {r.phone && (
+              <button
+                type="button"
+                onClick={() => onShowCopyPopup(r)}
+                className="flex items-center gap-1 rounded-lg bg-zinc-50 dark:bg-zinc-900 border border-zinc-250/60 dark:border-zinc-800 px-2 py-0.5 text-zinc-650 dark:text-zinc-350 hover:border-violet-400 hover:text-violet-600 dark:hover:text-violet-400 transition cursor-pointer font-medium"
+                title="Click to copy contact details"
+              >
+                📞 {r.phone}
+              </button>
+            )}
+            {r.parsed_json?.candidate_location && (
+              <span className="rounded-lg bg-zinc-50 dark:bg-zinc-900 border border-zinc-250/60 dark:border-zinc-800 px-2 py-0.5 text-zinc-700 dark:text-zinc-350">
+                📍 {r.parsed_json.candidate_location}
+              </span>
+            )}
+            {r.parsed_json?.years_experience != null && r.parsed_json.years_experience > 0 && (
+              <span className="rounded-lg bg-violet-50 dark:bg-violet-950/30 border border-violet-100 dark:border-violet-900/40 px-2 py-0.5 text-violet-700 dark:text-violet-300 font-semibold">
+                💼 {r.parsed_json.years_experience}y exp
+              </span>
+            )}
+            {r.parsed_json?.visa_status && (
+              <span className="rounded-lg bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 px-2 py-0.5 text-blue-700 dark:text-blue-300 font-semibold">
+                {formatVisaStatus(r.parsed_json.visa_status)}
+              </span>
+            )}
+            {r.parsed_json?.work_authorization && (
+              <span className="rounded-lg bg-indigo-50 dark:bg-indigo-950 border border-indigo-200 dark:border-indigo-800 px-2 py-0.5 text-indigo-700 dark:text-indigo-300 font-semibold">
+                {r.parsed_json.work_authorization}
+              </span>
+            )}
+          </div>
+
+          {/* Footer details toggler & actions */}
+          <div className="mt-4 pt-3 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2">
+            <button
+              onClick={() => onToggleExpand(r.id)}
+              disabled={r.status === "uploaded"}
+              className="flex items-center gap-1.5 text-xs font-semibold text-violet-600 dark:text-violet-400 hover:text-violet-800 dark:hover:text-violet-350 disabled:opacity-40 cursor-pointer"
+            >
+              {isExpanded ? "Hide Match Details" : "Show Match Details"}
+              <svg className={`w-3.5 h-3.5 transition-transform duration-250 ${isExpanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            <a
+              href={`/api/resumes/${r.id}/view`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`inline-flex items-center gap-1 rounded-xl px-3.5 py-1.5 text-xs font-bold shadow-sm transition-all duration-200 border ${
+                r.status === "uploaded"
+                  ? "border-zinc-200 dark:border-zinc-800 bg-zinc-100/50 dark:bg-zinc-800/50 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
+                  : "border-violet-200 dark:border-violet-800 bg-violet-500 text-white hover:bg-violet-600 hover:shadow-md cursor-pointer hover:-translate-y-0.5"
+              }`}
+              onClick={(e) => { if (r.status === "uploaded") e.preventDefault(); }}
+            >
+              View Resume
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            </a>
+          </div>
+        </div>
+      </div>
+      <MatchDetails candidate={r} isExpanded={isExpanded} isRetrying={isRetrying} onRetry={onRetry} />
+    </div>
+  );
+});
+
+CandidateCardModern.displayName = "CandidateCardModern";
+
+function CopyContactModal({
+  open,
+  onClose,
+  candidate,
+}: {
+  open: boolean;
+  onClose: () => void;
+  candidate: ResumeRow | null;
+}) {
+  const [copiedEmail, setCopiedEmail] = useState(false);
+  const [copiedPhone, setCopiedPhone] = useState(false);
+
+  useEffect(() => {
+    setCopiedEmail(false);
+    setCopiedPhone(false);
+  }, [candidate]);
+
+  if (!open || !candidate) return null;
+
+  const handleCopy = async (text: string, type: "email" | "phone") => {
+    try {
+      await navigator.clipboard.writeText(text);
+      if (type === "email") {
+        setCopiedEmail(true);
+        setTimeout(() => setCopiedEmail(false), 2000);
+      } else {
+        setCopiedPhone(true);
+        setTimeout(() => setCopiedPhone(false), 2000);
+      }
+    } catch (err) {
+      console.error("Failed to copy text: ", err);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center px-6 animate-fade-in">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      
+      {/* Modal Container */}
+      <div className="relative w-full max-w-md rounded-3xl border border-zinc-200/80 dark:border-zinc-800/80 bg-white/95 dark:bg-zinc-950/95 p-6 shadow-2xl backdrop-blur-md overflow-hidden text-zinc-900 dark:text-zinc-100">
+        {/* Glow Effects */}
+        <div className="absolute -right-16 -top-16 w-48 h-48 rounded-full bg-violet-500/10 dark:bg-violet-500/10 blur-2xl pointer-events-none" />
+        <div className="absolute -left-16 -bottom-16 w-48 h-48 rounded-full bg-indigo-500/10 dark:bg-indigo-500/10 blur-2xl pointer-events-none" />
+
+        {/* Header */}
+        <div className="flex items-start justify-between pb-4 border-b border-zinc-105 dark:border-zinc-800/80">
+          <div>
+            <h3 className="text-lg font-bold tracking-tight text-zinc-900 dark:text-white">
+              Contact Details
+            </h3>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+              For {candidate.full_name ?? "Unknown candidate"}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900/40 px-2.5 py-1.5 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-900/70 transition cursor-pointer font-bold"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="mt-5 space-y-4">
+          {/* Email Row */}
+          <div>
+            <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+              Email Address
+            </label>
+            {candidate.email ? (
+              <div className="mt-1.5 flex items-center justify-between gap-3 rounded-2xl border border-zinc-200 dark:border-zinc-850 bg-zinc-50/50 dark:bg-zinc-900/30 p-3 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition">
+                <span className="text-sm font-medium text-zinc-850 dark:text-zinc-200 truncate select-all">
+                  {candidate.email}
+                </span>
+                <button
+                  onClick={() => handleCopy(candidate.email!, "email")}
+                  className={`flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-bold transition shadow-sm cursor-pointer ${
+                    copiedEmail
+                      ? "bg-emerald-500 text-white shadow-emerald-500/10"
+                      : "bg-violet-600 text-white hover:bg-violet-750 shadow-violet-500/10"
+                  }`}
+                >
+                  {copiedEmail ? (
+                    <>
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                      Copied
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                      </svg>
+                      Copy
+                    </>
+                  )}
+                </button>
+              </div>
+            ) : (
+              <div className="mt-1.5 text-sm text-zinc-400 dark:text-zinc-500 italic p-3 border border-zinc-150 dark:border-zinc-850/50 rounded-2xl">
+                No email available
+              </div>
+            )}
+          </div>
+
+          {/* Phone Row */}
+          <div>
+            <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+              Phone Number
+            </label>
+            {candidate.phone ? (
+              <div className="mt-1.5 flex items-center justify-between gap-3 rounded-2xl border border-zinc-200 dark:border-zinc-850 bg-zinc-50/50 dark:bg-zinc-900/30 p-3 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition">
+                <span className="text-sm font-medium text-zinc-850 dark:text-zinc-200 truncate select-all">
+                  {candidate.phone}
+                </span>
+                <button
+                  onClick={() => handleCopy(candidate.phone!, "phone")}
+                  className={`flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-bold transition shadow-sm cursor-pointer ${
+                    copiedPhone
+                      ? "bg-emerald-500 text-white shadow-emerald-500/10"
+                      : "bg-violet-600 text-white hover:bg-violet-750 shadow-violet-500/10"
+                  }`}
+                >
+                  {copiedPhone ? (
+                    <>
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                      Copied
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                      </svg>
+                      Copy
+                    </>
+                  )}
+                </button>
+              </div>
+            ) : (
+              <div className="mt-1.5 text-sm text-zinc-400 dark:text-zinc-500 italic p-3 border border-zinc-150 dark:border-zinc-850/50 rounded-2xl">
+                No phone number available
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="mt-6 pt-4 border-t border-zinc-100 dark:border-zinc-800/80 flex justify-end">
+          <button
+            onClick={onClose}
+            className="w-full sm:w-auto rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/40 px-5 py-2.5 text-sm font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900/70 transition cursor-pointer text-center"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+

@@ -416,7 +416,7 @@ export default function DashboardPage() {
 
                     {j.description && (
                       <div className="mt-3 line-clamp-2 text-sm text-zinc-500 dark:text-zinc-400">
-                        {j.description}
+                        {j.description.split("---KEYWORDS---")[0].trim()}
                       </div>
                     )}
 

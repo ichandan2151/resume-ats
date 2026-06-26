@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { extractKeywordsFromJobDescription, calculateMatchScore } from "@/lib/openai";
 
 export const runtime = "nodejs";
 
@@ -14,15 +15,98 @@ export async function GET(
   if (!auth.user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { data, error } = await supabase
+  const { data: job, error: jobErr } = await supabase
     .from("jobs")
     .select("id, title, company, location, description, created_at")
     .eq("id", id)
     .single();
 
-  if (error)
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ data });
+  if (jobErr || !job) {
+    return NextResponse.json({ error: jobErr?.message || "Job campaign not found" }, { status: 404 });
+  }
+
+  let enrichedDescription = job.description;
+  let jobKeywords: string[] = [];
+
+  if (job.description) {
+    const parts = job.description.split("---KEYWORDS---");
+    if (parts.length > 1) {
+      try {
+        jobKeywords = JSON.parse(parts[1].trim());
+      } catch (e) {}
+    }
+
+    // Self-heal if delimiter is missing or keywords array is empty
+    if (parts.length === 1 || !Array.isArray(jobKeywords) || jobKeywords.length === 0) {
+      try {
+        const cleanDesc = parts[0].trim();
+        const contextText = `Title: ${job.title || ""}\nDescription: ${cleanDesc}`;
+        const keywords = await extractKeywordsFromJobDescription(contextText);
+        
+        enrichedDescription = `${cleanDesc}\n\n---KEYWORDS---\n${JSON.stringify(keywords)}`;
+        
+        await supabase
+          .from("jobs")
+          .update({ description: enrichedDescription })
+          .eq("id", id);
+
+        // Re-score all candidates linked to this campaign using the new keywords
+        if (keywords.length > 0) {
+          const { data: campaignResumes } = await supabase
+            .from("resumes")
+            .select("id, parsed_json, original_filename")
+            .eq("job_id", id);
+            
+          if (campaignResumes && campaignResumes.length > 0) {
+            for (const resume of campaignResumes) {
+              const candidateKeywords = [
+                ...(resume.parsed_json?.keywords || resume.parsed_json?.skills || [])
+              ].map((k: any) => String(k).toLowerCase().trim());
+
+              const { score, matched, missing } = calculateMatchScore(
+                keywords,
+                candidateKeywords,
+                resume.parsed_json?.years_experience
+              );
+              
+              const score_breakdown = {
+                relevance: `Matched ${matched.length} out of ${keywords.length} job keywords.`,
+                strengths: matched,
+                weaknesses: missing,
+              };
+              
+              const updatedParsed = {
+                ...(resume.parsed_json || {}),
+                scoring: {
+                  score,
+                  breakdown: score_breakdown,
+                }
+              };
+              
+              await supabase
+                .from("resumes")
+                .update({
+                  score,
+                  score_breakdown,
+                  scoring_version: "keyword-1.0",
+                  parsed_json: updatedParsed
+                })
+                .eq("id", resume.id);
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Failed to self-heal campaign keywords:", err);
+      }
+    }
+  }
+
+  return NextResponse.json({
+    data: {
+      ...job,
+      description: enrichedDescription,
+    }
+  });
 }
 
 export async function DELETE(

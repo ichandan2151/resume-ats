@@ -184,6 +184,7 @@ export async function parseResumeWithOpenAI(
       "visa_status": "string (enum: 'citizen', 'green_card', 'h1b', 'opt', 'stem_opt', 'cpt') or null if not explicitly stated",
       "work_authorization": "string (enum: 'authorized', 'sponsorship') or null if not explicitly stated",
       "skills": ["string", "string"],
+      "keywords": ["string", "string"],
       "summary": "string (brief summary of the candidate) or null",
       "experience": [
         {
@@ -235,6 +236,7 @@ export async function parseResumeWithOpenAI(
     - For visa_status, map to 'citizen', 'green_card', 'h1b', 'opt', 'stem_opt', or 'cpt' if possible. If uncertain or other, use null.
     - For work_authorization, map to 'authorized' if they are a citizen/GC or have a work permit. Map to 'sponsorship' if they require sponsorship.
     - years_experience should be a number.
+    - keywords: Extract 15-30 lowercase keyword tags from the resume (e.g. programming languages, libraries, tools, frameworks, databases, methodologies, soft skills, certifications, and domain expertise).
     - SCORING: If the Job Context is "Not provided" or vague, score the candidate based on their general strength as a professional. Otherwise, strictly score their relevance to the actual job description. Be objective.
   `;
 
@@ -279,4 +281,75 @@ export async function parseResumeWithOpenAI(
       return classified;
     }
   }
+}
+
+export async function extractKeywordsFromJobDescription(
+  description: string,
+): Promise<string[]> {
+  if (!process.env.OPENAI_API_KEY) {
+    return [];
+  }
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: "You are a strict keyword extractor. Extract only the technical skills, tools, job titles, or experience requirements that are EXPLICITLY written in the job description. Do NOT suggest, imply, invent, or add any related technologies, tools, or concepts if they are not explicitly written. For example, if the text only mentions 'Java Developer', do not output 'Spring Framework' or 'Hibernate'. Return ONLY a JSON object with a single key 'keywords' containing the array of lowercase strings.",
+        },
+        {
+          role: "user",
+          content: description,
+        },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.1,
+    });
+
+    const responseText = response.choices[0]?.message?.content;
+    if (!responseText) {
+      return [];
+    }
+
+    const parsed = JSON.parse(responseText.trim());
+    return Array.isArray(parsed.keywords)
+      ? parsed.keywords.map((k: string) => String(k).toLowerCase().trim())
+      : [];
+  } catch (error) {
+    console.error("Failed to extract keywords from job description:", error);
+    return [];
+  }
+}
+
+export function calculateMatchScore(
+  jobKeywords: string[],
+  candidateKeywords: string[],
+  candidateYearsExperience?: number | null
+): { score: number; matched: string[]; missing: string[] } {
+  if (jobKeywords.length === 0) {
+    return { score: 0, matched: [], missing: [] };
+  }
+
+  const parseYearsFromKeyword = (kw: string): number | null => {
+    const match = kw.match(/(\d+)\s*(?:\+)?\s*(?:year|yr)s?/i);
+    return match ? parseInt(match[1], 10) : null;
+  };
+
+  const matched = jobKeywords.filter((kw) => {
+    const reqYears = parseYearsFromKeyword(kw);
+    if (reqYears !== null && typeof candidateYearsExperience === "number") {
+      if (candidateYearsExperience >= reqYears) {
+        return true;
+      }
+    }
+    return candidateKeywords.some(
+      (ck) => ck.includes(kw) || kw.includes(ck)
+    );
+  });
+
+  const missing = jobKeywords.filter((kw) => !matched.includes(kw));
+
+  const score = Math.round((matched.length / jobKeywords.length) * 100);
+
+  return { score, matched, missing };
 }

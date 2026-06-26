@@ -1,6 +1,6 @@
 import { NextResponse, after } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { parseResumeWithOpenAI } from "@/lib/openai";
+import { parseResumeWithOpenAI, extractKeywordsFromJobDescription, calculateMatchScore } from "@/lib/openai";
 
 export const runtime = "nodejs";
 
@@ -144,8 +144,8 @@ export async function retryInBackground(
         .eq("id", id);
     }
 
-    // Fetch job context
-    let jobContext = "Not provided";
+    // 1) Fetch job keywords if jobId is present
+    let jobKeywords: string[] = [];
     if (jobId) {
       const { data: jobData } = await supabaseAdmin
         .from("jobs")
@@ -153,15 +153,28 @@ export async function retryInBackground(
         .eq("id", jobId)
         .single();
 
-      if (jobData) {
-        jobContext = `Title: ${jobData.title || "Unknown"}\nDescription: ${
-          jobData.description || "Not provided"
-        }`;
+      if (jobData && jobData.description) {
+        const parts = jobData.description.split("---KEYWORDS---");
+        if (parts.length > 1) {
+          try {
+            jobKeywords = JSON.parse(parts[1].trim());
+          } catch (e) {
+            console.error("Failed to parse existing job keywords during retry:", e);
+          }
+        } else {
+          // Dynamic keyword extraction if missing (self-heal)
+          jobKeywords = await extractKeywordsFromJobDescription(`Title: ${jobData.title || ""}\nDescription: ${jobData.description}`);
+          const enrichedDesc = `${jobData.description}\n\n---KEYWORDS---\n${JSON.stringify(jobKeywords)}`;
+          await supabaseAdmin
+            .from("jobs")
+            .update({ description: enrichedDesc })
+            .eq("id", jobId);
+        }
       }
     }
 
     const cleaned = cleanText(textToUse ?? "");
-    const openaiResult = await parseResumeWithOpenAI(cleaned, jobContext);
+    const openaiResult = await parseResumeWithOpenAI(cleaned, "Not provided");
 
     if (!openaiResult.success) {
       await supabaseAdmin
@@ -179,11 +192,38 @@ export async function retryInBackground(
     }
 
     const openaiData = openaiResult.data;
-    const finalScore = openaiData.scoring?.score ?? 0;
-    const finalBreakdown = openaiData.scoring?.breakdown ?? {
-      relevance: "Scoring failed",
-      strengths: [],
-      weaknesses: [],
+
+    // 2) Compute matching score locally in code
+    let finalScore = null;
+    let finalBreakdown = {};
+
+    if (jobId) {
+      const candidateKeywords = [
+        ...(openaiData.keywords || openaiData.skills || [])
+      ].map((k: any) => String(k).toLowerCase().trim());
+
+      const { score, matched, missing } = calculateMatchScore(
+        jobKeywords,
+        candidateKeywords,
+        openaiData.years_experience
+      );
+      
+      finalScore = score;
+      finalBreakdown = {
+        relevance: `Matched ${matched.length} out of ${jobKeywords.length} job keywords.`,
+        strengths: matched,
+        weaknesses: missing,
+      };
+    }
+
+    const updatedParsed = {
+      ...(openaiData || {}),
+      scoring: jobId
+        ? {
+            score: finalScore,
+            breakdown: finalBreakdown,
+          }
+        : undefined,
     };
 
     await supabaseAdmin
@@ -193,10 +233,10 @@ export async function retryInBackground(
         email: openaiData.email,
         phone: openaiData.phone,
         status: "scored",
-        score: jobId ? finalScore : null,
-        score_breakdown: jobId ? finalBreakdown : {},
-        scoring_version: "openai-1.0",
-        parsed_json: openaiData,
+        score: finalScore,
+        score_breakdown: finalBreakdown,
+        scoring_version: "keyword-1.0",
+        parsed_json: updatedParsed,
       })
       .eq("id", id);
   } catch (err: any) {

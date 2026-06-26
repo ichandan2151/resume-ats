@@ -138,6 +138,7 @@ export default function CandidateDirectory(props: { onResumesChanged?: () => voi
   const [deleteCandidate, setDeleteCandidate] = useState<CandidateRow | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [copyPopupCandidate, setCopyPopupCandidate] = useState<CandidateRow | null>(null);
   const [pollingIds, setPollingIds] = useState<Set<string>>(new Set());
   const [retryingIds, setRetryingIds] = useState<Set<string>>(new Set());
 
@@ -1055,8 +1056,26 @@ export default function CandidateDirectory(props: { onResumesChanged?: () => voi
 
                     {/* Metadata labels */}
                     <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-                      {c.email && <span className="text-zinc-650 dark:text-zinc-300">{c.email}</span>}
-                      {c.phone && <span className="text-zinc-400 dark:text-zinc-500">{c.phone}</span>}
+                      {c.email && (
+                        <button
+                          type="button"
+                          onClick={() => setCopyPopupCandidate(c)}
+                          className="text-zinc-650 dark:text-zinc-350 hover:text-violet-600 dark:hover:text-violet-400 hover:underline transition flex items-center gap-1 cursor-pointer font-medium"
+                          title="Click to copy contact details"
+                        >
+                          ✉️ {c.email}
+                        </button>
+                      )}
+                      {c.phone && (
+                        <button
+                          type="button"
+                          onClick={() => setCopyPopupCandidate(c)}
+                          className="text-zinc-400 dark:text-zinc-500 hover:text-violet-600 dark:hover:text-violet-400 hover:underline transition flex items-center gap-1 cursor-pointer font-medium"
+                          title="Click to copy contact details"
+                        >
+                          📞 {c.phone}
+                        </button>
+                      )}
                       {isValidLinkedInUrl(c.parsed_json?.linkedin) && (
                         <a
                           href={getLinkedInUrl(c.parsed_json.linkedin)}
@@ -1454,6 +1473,178 @@ export default function CandidateDirectory(props: { onResumesChanged?: () => voi
           </div>
         </div>
       )}
+
+      {copyPopupCandidate && (
+        <CopyContactModal
+          open={!!copyPopupCandidate}
+          onClose={() => setCopyPopupCandidate(null)}
+          candidate={copyPopupCandidate}
+        />
+      )}
+    </div>
+  );
+}
+
+function CopyContactModal({
+  open,
+  onClose,
+  candidate,
+}: {
+  open: boolean;
+  onClose: () => void;
+  candidate: CandidateRow | null;
+}) {
+  const [copiedEmail, setCopiedEmail] = useState(false);
+  const [copiedPhone, setCopiedPhone] = useState(false);
+
+  useEffect(() => {
+    setCopiedEmail(false);
+    setCopiedPhone(false);
+  }, [candidate]);
+
+  if (!open || !candidate) return null;
+
+  const handleCopy = async (text: string, type: "email" | "phone") => {
+    try {
+      await navigator.clipboard.writeText(text);
+      if (type === "email") {
+        setCopiedEmail(true);
+        setTimeout(() => setCopiedEmail(false), 2000);
+      } else {
+        setCopiedPhone(true);
+        setTimeout(() => setCopiedPhone(false), 2000);
+      }
+    } catch (err) {
+      console.error("Failed to copy text: ", err);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center px-6 animate-fade-in">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      
+      {/* Modal Container */}
+      <div className="relative w-full max-w-md rounded-3xl border border-zinc-200/80 dark:border-zinc-800/80 bg-white/95 dark:bg-zinc-950/95 p-6 shadow-2xl backdrop-blur-md overflow-hidden text-zinc-900 dark:text-zinc-100 animate-scale-up">
+        {/* Glow Effects */}
+        <div className="absolute -right-16 -top-16 w-48 h-48 rounded-full bg-violet-500/10 dark:bg-violet-500/10 blur-2xl pointer-events-none" />
+        <div className="absolute -left-16 -bottom-16 w-48 h-48 rounded-full bg-indigo-500/10 dark:bg-indigo-500/10 blur-2xl pointer-events-none" />
+
+        {/* Header */}
+        <div className="flex items-start justify-between pb-4 border-b border-zinc-100 dark:border-zinc-800/80">
+          <div>
+            <h3 className="text-lg font-bold tracking-tight text-zinc-900 dark:text-white">
+              Contact Details
+            </h3>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+              For {candidate.full_name ?? "Unknown candidate"}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900/40 px-2.5 py-1.5 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-900/70 transition cursor-pointer font-bold"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="mt-5 space-y-4">
+          {/* Email Row */}
+          <div>
+            <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+              Email Address
+            </label>
+            {candidate.email ? (
+              <div className="mt-1.5 flex items-center justify-between gap-3 rounded-2xl border border-zinc-200 dark:border-zinc-850 bg-zinc-50/50 dark:bg-zinc-900/30 p-3 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition">
+                <span className="text-sm font-medium text-zinc-850 dark:text-zinc-200 truncate select-all">
+                  {candidate.email}
+                </span>
+                <button
+                  onClick={() => handleCopy(candidate.email!, "email")}
+                  className={`flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-bold transition shadow-sm cursor-pointer ${
+                    copiedEmail
+                      ? "bg-emerald-500 text-white shadow-emerald-500/10"
+                      : "bg-violet-600 text-white hover:bg-violet-750 shadow-violet-500/10"
+                  }`}
+                >
+                  {copiedEmail ? (
+                    <>
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                      Copied
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                      </svg>
+                      Copy
+                    </>
+                  )}
+                </button>
+              </div>
+            ) : (
+              <div className="mt-1.5 text-sm text-zinc-400 dark:text-zinc-500 italic p-3 border border-zinc-150 dark:border-zinc-850/50 rounded-2xl">
+                No email available
+              </div>
+            )}
+          </div>
+
+          {/* Phone Row */}
+          <div>
+            <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+              Phone Number
+            </label>
+            {candidate.phone ? (
+              <div className="mt-1.5 flex items-center justify-between gap-3 rounded-2xl border border-zinc-200 dark:border-zinc-850 bg-zinc-50/50 dark:bg-zinc-900/30 p-3 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition">
+                <span className="text-sm font-medium text-zinc-850 dark:text-zinc-200 truncate select-all">
+                  {candidate.phone}
+                </span>
+                <button
+                  onClick={() => handleCopy(candidate.phone!, "phone")}
+                  className={`flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-bold transition shadow-sm cursor-pointer ${
+                    copiedPhone
+                      ? "bg-emerald-500 text-white shadow-emerald-500/10"
+                      : "bg-violet-600 text-white hover:bg-violet-750 shadow-violet-500/10"
+                  }`}
+                >
+                  {copiedPhone ? (
+                    <>
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                      </svg>
+                      Copied
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                      </svg>
+                      Copy
+                    </>
+                  )}
+                </button>
+              </div>
+            ) : (
+              <div className="mt-1.5 text-sm text-zinc-400 dark:text-zinc-500 italic p-3 border border-zinc-150 dark:border-zinc-850/50 rounded-2xl">
+                No phone number available
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="mt-6 pt-4 border-t border-zinc-100 dark:border-zinc-800/80 flex justify-end">
+          <button
+            onClick={onClose}
+            className="w-full sm:w-auto rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/40 px-5 py-2.5 text-sm font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900/70 transition cursor-pointer text-center"
+          >
+            Close
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,117 +1,8 @@
-import { NextResponse, after } from "next/server";
+import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { parseResumeWithOpenAI } from "@/lib/openai";
+import { extractKeywordsFromJobDescription, calculateMatchScore } from "@/lib/openai";
 
 export const runtime = "nodejs";
-
-// Background processing for scoring the imported candidate against the search campaign description
-export async function analyzeResumeBackground(
-  userId: string,
-  searchId: string,
-  id: string,
-  extractedText: string,
-  fileName: string,
-) {
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    console.error("Missing SUPABASE_SERVICE_ROLE_KEY in .env.local");
-    return;
-  }
-
-  const supabaseAdmin = (await import("@supabase/supabase-js")).createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  );
-
-  try {
-    // 1) Fetch search details for Gemini context (using jobs table)
-    let searchContext = "Not provided";
-    const { data: searchData } = await supabaseAdmin
-      .from("jobs")
-      .select("title, description")
-      .eq("id", searchId)
-      .single();
-
-    if (searchData) {
-      searchContext = `Title: ${searchData.title || "Unknown"}\nDescription: ${
-        searchData.description || "Not provided"
-      }`;
-    }
-
-    // 2) Score resume with OpenAI using the target search campaign description
-    const openaiResult = await parseResumeWithOpenAI(extractedText, searchContext);
-
-    if (!openaiResult.success) {
-      await supabaseAdmin
-        .from("resumes")
-        .update({
-          status: "error",
-          parsed_json: {
-            error: openaiResult.message,
-            error_code: openaiResult.code,
-            retryable: openaiResult.retryable,
-          },
-        })
-        .eq("id", id);
-      return;
-    }
-
-    const openaiData = openaiResult.data;
-    const finalScore = openaiData.scoring?.score ?? 0;
-    const finalBreakdown = openaiData.scoring?.breakdown ?? {
-      relevance: "Scoring failed",
-      strengths: [],
-      weaknesses: [],
-    };
-
-    // Keep candidate data from original parse, but update scoring
-    const { data: currentResume } = await supabaseAdmin
-      .from("resumes")
-      .select("parsed_json")
-      .eq("id", id)
-      .single();
-
-    const currentParsed = currentResume?.parsed_json || {};
-    const updatedParsed = {
-      ...currentParsed,
-      scoring: openaiData.scoring
-    };
-
-    const { error: updErr } = await supabaseAdmin
-      .from("resumes")
-      .update({
-        status: "scored",
-        score: finalScore,
-        score_breakdown: finalBreakdown,
-        scoring_version: "openai-1.0",
-        parsed_json: updatedParsed,
-      })
-      .eq("id", id);
-
-    if (updErr) throw new Error(updErr.message);
-  } catch (err: any) {
-    console.error("Background analysis failed for resume", id, fileName, err);
-    await supabaseAdmin
-      .from("resumes")
-      .update({
-        status: "error",
-        parsed_json: {
-          error: err?.message ?? String(err),
-          error_code: "UNKNOWN",
-          retryable: true,
-        },
-      })
-      .eq("id", id);
-  } finally {
-    if (searchId) {
-      try {
-        const { checkAndSendSearchNotification } = await import("@/lib/mail");
-        await checkAndSendSearchNotification(supabaseAdmin, userId, searchId);
-      } catch (mailErr) {
-        console.error("Failed to trigger search criteria completion email notification:", mailErr);
-      }
-    }
-  }
-}
 
 export async function POST(
   req: Request,
@@ -130,10 +21,10 @@ export async function POST(
       return NextResponse.json({ error: "Missing resumeIds" }, { status: 400 });
     }
 
-    // Verify search exists and belongs to the user
+    // 1. Fetch the target job campaign details
     const { data: search, error: searchErr } = await supabase
       .from("jobs")
-      .select("id")
+      .select("id, title, description")
       .eq("id", searchId)
       .single();
 
@@ -141,10 +32,33 @@ export async function POST(
       return NextResponse.json({ error: "Search criteria not found" }, { status: 404 });
     }
 
-    const importedIds: string[] = [];
+    // 2. Parse job description keywords
+    let jobKeywords: string[] = [];
+    if (search.description) {
+      const parts = search.description.split("---KEYWORDS---");
+      if (parts.length > 1) {
+        try {
+          jobKeywords = JSON.parse(parts[1].trim());
+        } catch (e) {
+          console.error("Failed to parse existing job keywords during import:", e);
+        }
+      } else {
+        // Dynamic keyword extraction if missing (self-heal)
+        jobKeywords = await extractKeywordsFromJobDescription(`Title: ${search.title || ""}\nDescription: ${search.description}`);
+        const enrichedDesc = `${search.description}\n\n---KEYWORDS---\n${JSON.stringify(jobKeywords)}`;
+        await supabase
+          .from("jobs")
+          .update({ description: enrichedDesc })
+          .eq("id", searchId);
+      }
+    }
 
+    const importedIds: string[] = [];
+    const rowsToInsert: any[] = [];
+
+    // 3. Process each candidate
     for (const resumeId of resumeIds) {
-      // 1) Fetch source resume
+      // Fetch source resume
       const { data: srcResume, error: srcErr } = await supabase
         .from("resumes")
         .select("*")
@@ -161,7 +75,7 @@ export async function POST(
         continue;
       }
 
-      // 2) Check for duplicates already in this search campaign
+      // Check for duplicates already in this search campaign
       let hasDuplicate = false;
       const email = srcResume.email?.trim().toLowerCase();
       if (email) {
@@ -186,45 +100,67 @@ export async function POST(
         continue;
       }
 
-      // 3) Create a new resume record linked to the target search campaign (mapped to job_id column)
-      const { data: newRow, error: insErr } = await supabase
-        .from("resumes")
-        .insert({
-          owner_id: auth.user.id,
-          job_id: searchId,
-          source: "upload",
-          original_filename: srcResume.original_filename,
-          storage_bucket: srcResume.storage_bucket,
-          storage_path: srcResume.storage_path,
-          mime_type: srcResume.mime_type,
-          file_size_bytes: srcResume.file_size_bytes,
-          full_name: srcResume.full_name,
-          email: srcResume.email,
-          phone: srcResume.phone,
-          location: srcResume.location,
-          extracted_text: srcResume.extracted_text,
-          parsed_json: srcResume.parsed_json,
-          status: "uploaded",
-        })
-        .select("id")
-        .single();
+      // 4. Compute matching score locally in code
+      const candidateKeywords = [
+        ...(srcResume.parsed_json?.keywords || srcResume.parsed_json?.skills || [])
+      ].map((k: any) => String(k).toLowerCase().trim());
 
-      if (insErr || !newRow) {
-        continue;
+      const { score, matched, missing } = calculateMatchScore(
+        jobKeywords,
+        candidateKeywords,
+        srcResume.parsed_json?.years_experience
+      );
+
+      const score_breakdown = {
+        relevance: `Matched ${matched.length} out of ${jobKeywords.length} job keywords.`,
+        strengths: matched,
+        weaknesses: missing,
+      };
+
+      const updatedParsed = {
+        ...(srcResume.parsed_json || {}),
+        scoring: {
+          score,
+          breakdown: score_breakdown,
+        },
+      };
+
+      rowsToInsert.push({
+        owner_id: auth.user.id,
+        job_id: searchId,
+        source: "upload",
+        original_filename: srcResume.original_filename,
+        storage_bucket: srcResume.storage_bucket,
+        storage_path: srcResume.storage_path,
+        mime_type: srcResume.mime_type,
+        file_size_bytes: srcResume.file_size_bytes,
+        full_name: srcResume.full_name,
+        email: srcResume.email,
+        phone: srcResume.phone,
+        location: srcResume.location,
+        extracted_text: srcResume.extracted_text,
+        parsed_json: updatedParsed,
+        status: "scored",
+        score,
+        score_breakdown,
+        scoring_version: "keyword-1.0",
+      });
+    }
+
+    // 5. Bulk insert the matched candidate rows
+    if (rowsToInsert.length > 0) {
+      const { data: insertedRows, error: insErr } = await supabase
+        .from("resumes")
+        .insert(rowsToInsert)
+        .select("id");
+
+      if (insErr) {
+        throw new Error("Bulk insert failed: " + insErr.message);
       }
 
-      importedIds.push(newRow.id);
-
-      // 4) Score the cloned candidate in the background using after() for Vercel
-      after(() => {
-        analyzeResumeBackground(
-          auth.user.id,
-          searchId,
-          newRow.id,
-          srcResume.extracted_text || "",
-          srcResume.original_filename,
-        ).catch(console.error);
-      });
+      if (insertedRows) {
+        insertedRows.forEach((row) => importedIds.push(row.id));
+      }
     }
 
     return NextResponse.json({
