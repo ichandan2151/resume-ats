@@ -1,6 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { extractKeywordsFromJobDescription, calculateMatchScore } from "@/lib/openai";
+import { parseCampaignDescription, encodeCampaignDescription } from "@/lib/campaign";
+import { retryInBackground } from "@/app/api/resumes/[id]/retry/route";
 
 export const runtime = "nodejs";
 
@@ -32,20 +34,20 @@ export async function POST(
       return NextResponse.json({ error: "Search criteria not found" }, { status: 404 });
     }
 
-    // 2. Parse job description keywords
+    // 2. Parse job description keywords and check if AI screening is enabled
     let jobKeywords: string[] = [];
+    let aiScreening = false;
+    let jobDescOnly = "";
     if (search.description) {
-      const parts = search.description.split("---KEYWORDS---");
-      if (parts.length > 1) {
-        try {
-          jobKeywords = JSON.parse(parts[1].trim());
-        } catch (e) {
-          console.error("Failed to parse existing job keywords during import:", e);
-        }
-      } else {
+      const parsed = parseCampaignDescription(search.description);
+      jobKeywords = parsed.keywords;
+      aiScreening = parsed.aiScreening;
+      jobDescOnly = parsed.descriptionText;
+
+      if (jobKeywords.length === 0) {
         // Dynamic keyword extraction if missing (self-heal)
-        jobKeywords = await extractKeywordsFromJobDescription(`Title: ${search.title || ""}\nDescription: ${search.description}`);
-        const enrichedDesc = `${search.description}\n\n---KEYWORDS---\n${JSON.stringify(jobKeywords)}`;
+        jobKeywords = await extractKeywordsFromJobDescription(`Title: ${search.title || ""}\nDescription: ${jobDescOnly || search.description}`);
+        const enrichedDesc = encodeCampaignDescription(jobDescOnly || search.description, jobKeywords, aiScreening);
         await supabase
           .from("jobs")
           .update({ description: enrichedDesc })
@@ -100,51 +102,74 @@ export async function POST(
         continue;
       }
 
-      // 4. Compute matching score locally in code
-      const candidateKeywords = [
-        ...(srcResume.parsed_json?.keywords || srcResume.parsed_json?.skills || [])
-      ].map((k: any) => String(k).toLowerCase().trim());
+      // 4. Compute matching score or prepare AI scoring background tasks
+      if (aiScreening) {
+        rowsToInsert.push({
+          owner_id: auth.user.id,
+          job_id: searchId,
+          source: "upload",
+          original_filename: srcResume.original_filename,
+          storage_bucket: srcResume.storage_bucket,
+          storage_path: srcResume.storage_path,
+          mime_type: srcResume.mime_type,
+          file_size_bytes: srcResume.file_size_bytes,
+          full_name: srcResume.full_name,
+          email: srcResume.email,
+          phone: srcResume.phone,
+          location: srcResume.location,
+          extracted_text: srcResume.extracted_text,
+          parsed_json: srcResume.parsed_json,
+          status: "uploaded",
+          score: null,
+          score_breakdown: {},
+          scoring_version: "ai-1.0",
+        });
+      } else {
+        const candidateKeywords = [
+          ...(srcResume.parsed_json?.keywords || srcResume.parsed_json?.skills || [])
+        ].map((k: any) => String(k).toLowerCase().trim());
 
-      const { score, matched, missing } = calculateMatchScore(
-        jobKeywords,
-        candidateKeywords,
-        srcResume.parsed_json?.years_experience
-      );
+        const { score, matched, missing } = calculateMatchScore(
+          jobKeywords,
+          candidateKeywords,
+          srcResume.parsed_json?.years_experience
+        );
 
-      const score_breakdown = {
-        relevance: `Matched ${matched.length} out of ${jobKeywords.length} job keywords.`,
-        strengths: matched,
-        weaknesses: missing,
-      };
+        const score_breakdown = {
+          relevance: `Matched ${matched.length} out of ${jobKeywords.length} job keywords.`,
+          strengths: matched,
+          weaknesses: missing,
+        };
 
-      const updatedParsed = {
-        ...(srcResume.parsed_json || {}),
-        scoring: {
+        const updatedParsed = {
+          ...(srcResume.parsed_json || {}),
+          scoring: {
+            score,
+            breakdown: score_breakdown,
+          },
+        };
+
+        rowsToInsert.push({
+          owner_id: auth.user.id,
+          job_id: searchId,
+          source: "upload",
+          original_filename: srcResume.original_filename,
+          storage_bucket: srcResume.storage_bucket,
+          storage_path: srcResume.storage_path,
+          mime_type: srcResume.mime_type,
+          file_size_bytes: srcResume.file_size_bytes,
+          full_name: srcResume.full_name,
+          email: srcResume.email,
+          phone: srcResume.phone,
+          location: srcResume.location,
+          extracted_text: srcResume.extracted_text,
+          parsed_json: updatedParsed,
+          status: "scored",
           score,
-          breakdown: score_breakdown,
-        },
-      };
-
-      rowsToInsert.push({
-        owner_id: auth.user.id,
-        job_id: searchId,
-        source: "upload",
-        original_filename: srcResume.original_filename,
-        storage_bucket: srcResume.storage_bucket,
-        storage_path: srcResume.storage_path,
-        mime_type: srcResume.mime_type,
-        file_size_bytes: srcResume.file_size_bytes,
-        full_name: srcResume.full_name,
-        email: srcResume.email,
-        phone: srcResume.phone,
-        location: srcResume.location,
-        extracted_text: srcResume.extracted_text,
-        parsed_json: updatedParsed,
-        status: "scored",
-        score,
-        score_breakdown,
-        scoring_version: "keyword-1.0",
-      });
+          score_breakdown,
+          scoring_version: "keyword-1.0",
+        });
+      }
     }
 
     // 5. Bulk insert the matched candidate rows
@@ -152,7 +177,7 @@ export async function POST(
       const { data: insertedRows, error: insErr } = await supabase
         .from("resumes")
         .insert(rowsToInsert)
-        .select("id");
+        .select("id, extracted_text, storage_bucket, storage_path");
 
       if (insErr) {
         throw new Error("Bulk insert failed: " + insErr.message);
@@ -160,6 +185,22 @@ export async function POST(
 
       if (insertedRows) {
         insertedRows.forEach((row) => importedIds.push(row.id));
+
+        if (aiScreening) {
+          // Trigger background screening using after()
+          after(() => {
+            for (const row of insertedRows) {
+              retryInBackground(
+                auth.user.id,
+                searchId,
+                row.id,
+                row.extracted_text,
+                row.storage_bucket || "resumes",
+                row.storage_path || ""
+              ).catch(console.error);
+            }
+          });
+        }
       }
     }
 

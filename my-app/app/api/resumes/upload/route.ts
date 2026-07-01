@@ -4,6 +4,7 @@ import JSZip from "jszip";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { scoreResume } from "@/lib/parse";
 import { parseResumeWithOpenAI, extractKeywordsFromJobDescription, calculateMatchScore } from "@/lib/openai";
+import { parseCampaignDescription, encodeCampaignDescription } from "@/lib/campaign";
 import { extractText } from "@/lib/extract";
 import { lookup } from "mime-types";
 
@@ -103,8 +104,12 @@ export async function processResumeBackground(
   );
 
   try {
-    // 1) Fetch job keywords if jobId is present
+    // 1) Fetch job keywords and AI screening toggle if jobId is present
     let jobKeywords: string[] = [];
+    let aiScreening = false;
+    let jobDescOnly = "";
+    let jobTitle = "";
+
     if (jobId) {
       const { data: jobData } = await supabaseAdmin
         .from("jobs")
@@ -113,17 +118,16 @@ export async function processResumeBackground(
         .single();
 
       if (jobData && jobData.description) {
-        const parts = jobData.description.split("---KEYWORDS---");
-        if (parts.length > 1) {
-          try {
-            jobKeywords = JSON.parse(parts[1].trim());
-          } catch (e) {
-            console.error("Failed to parse existing job keywords:", e);
-          }
-        } else {
+        jobTitle = jobData.title || "";
+        const parsed = parseCampaignDescription(jobData.description);
+        jobKeywords = parsed.keywords;
+        aiScreening = parsed.aiScreening;
+        jobDescOnly = parsed.descriptionText;
+
+        if (jobKeywords.length === 0) {
           // Dynamic keyword extraction if missing (self-heal)
-          jobKeywords = await extractKeywordsFromJobDescription(`Title: ${jobData.title || ""}\nDescription: ${jobData.description}`);
-          const enrichedDesc = `${jobData.description}\n\n---KEYWORDS---\n${JSON.stringify(jobKeywords)}`;
+          jobKeywords = await extractKeywordsFromJobDescription(`Title: ${jobTitle}\nDescription: ${jobDescOnly || jobData.description}`);
+          const enrichedDesc = encodeCampaignDescription(jobDescOnly || jobData.description, jobKeywords, aiScreening);
           await supabaseAdmin
             .from("jobs")
             .update({ description: enrichedDesc })
@@ -132,11 +136,17 @@ export async function processResumeBackground(
       }
     }
 
-    // 2) Parse candidate resume with OpenAI (WITHOUT job context evaluation)
+    // 2) Parse candidate resume with OpenAI (WITH or WITHOUT job context evaluation)
     const raw = await extractText(fileName, mimeType, bytes);
     const extracted_text = cleanText(raw);
 
-    const openaiResult = await parseResumeWithOpenAI(extracted_text, "Not provided");
+    let openaiResult;
+    if (jobId && aiScreening) {
+      const jobContext = `Title: ${jobTitle}\nRequirements / Description:\n${jobDescOnly}`;
+      openaiResult = await parseResumeWithOpenAI(extracted_text, jobContext);
+    } else {
+      openaiResult = await parseResumeWithOpenAI(extracted_text, "Not provided");
+    }
 
     if (!openaiResult.success) {
       // Store the structured error for the frontend
@@ -159,27 +169,32 @@ export async function processResumeBackground(
 
     const openaiData = openaiResult.data;
 
-    // 3) Compute score programmatically if jobId exists
+    // 3) Compute score programmatically or extract AI score if jobId exists
     let finalScore = null;
     let finalBreakdown = {};
 
     if (jobId) {
-      const candidateKeywords = [
-        ...(openaiData.keywords || openaiData.skills || [])
-      ].map((k: any) => String(k).toLowerCase().trim());
+      if (aiScreening) {
+        finalScore = openaiData.scoring?.score ?? null;
+        finalBreakdown = openaiData.scoring?.breakdown ?? {};
+      } else {
+        const candidateKeywords = [
+          ...(openaiData.keywords || openaiData.skills || [])
+        ].map((k: any) => String(k).toLowerCase().trim());
 
-      const { score, matched, missing } = calculateMatchScore(
-        jobKeywords,
-        candidateKeywords,
-        openaiData.years_experience
-      );
-      
-      finalScore = score;
-      finalBreakdown = {
-        relevance: `Matched ${matched.length} out of ${jobKeywords.length} job keywords.`,
-        strengths: matched,
-        weaknesses: missing,
-      };
+        const { score, matched, missing } = calculateMatchScore(
+          jobKeywords,
+          candidateKeywords,
+          openaiData.years_experience
+        );
+        
+        finalScore = score;
+        finalBreakdown = {
+          relevance: `Matched ${matched.length} out of ${jobKeywords.length} job keywords.`,
+          strengths: matched,
+          weaknesses: missing,
+        };
+      }
     }
 
     const updatedParsed = {
@@ -204,7 +219,7 @@ export async function processResumeBackground(
         status: "scored",
         score: finalScore,
         score_breakdown: finalBreakdown,
-        scoring_version: "keyword-1.0",
+        scoring_version: aiScreening ? "ai-1.0" : "keyword-1.0",
         parsed_json: updatedParsed,
       })
       .eq("id", id);

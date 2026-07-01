@@ -91,6 +91,7 @@ export default function DashboardPage() {
   const [company, setCompany] = useState("");
   const [location, setLocation] = useState("");
   const [description, setDescription] = useState("");
+  const [aiScreening, setAiScreening] = useState(true);
 
   const tourSteps = useMemo(() => {
     if (open) {
@@ -243,7 +244,6 @@ export default function DashboardPage() {
     setErr(null);
     if (!title.trim()) return;
 
-    setCreating(true);
     try {
       const res = await fetch("/api/search-candidate", {
         method: "POST",
@@ -253,6 +253,7 @@ export default function DashboardPage() {
           company: company.trim() || null,
           location: location.trim() || null,
           description: description.trim() || null,
+          aiScreening,
         }),
       });
       const json = await res.json();
@@ -263,6 +264,7 @@ export default function DashboardPage() {
       setCompany("");
       setLocation("");
       setDescription("");
+      setAiScreening(true);
       setOpen(false);
 
       if (json.data?.id) {
@@ -515,6 +517,8 @@ export default function DashboardPage() {
         setLocation={setLocation}
         description={description}
         setDescription={setDescription}
+        aiScreening={aiScreening}
+        setAiScreening={setAiScreening}
         creating={creating}
         canCreate={canCreate}
         onCreate={createSearchCampaign}
@@ -704,6 +708,8 @@ function CreateSearchCampaignModal(props: {
   setLocation: (v: string) => void;
   description: string;
   setDescription: (v: string) => void;
+  aiScreening: boolean;
+  setAiScreening: (v: boolean) => void;
   creating: boolean;
   canCreate: boolean;
   onCreate: () => void;
@@ -759,6 +765,31 @@ function CreateSearchCampaignModal(props: {
             placeholder="SearchCampaign description (required)"
             className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/30 px-4 py-3 text-sm outline-none text-zinc-900 dark:text-zinc-100 focus:border-zinc-400 dark:focus:border-zinc-600"
           />
+
+          {/* AI-Powered Screening Toggle */}
+          <div className="rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/40 dark:bg-zinc-900/10 p-4 flex items-center justify-between gap-4 transition-all duration-300">
+            <div className="flex-1">
+              <div className="text-sm font-semibold text-zinc-950 dark:text-white flex items-center gap-1.5">
+                <span>🤖</span> AI-Powered Screening
+              </div>
+              <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                When enabled, OpenAI will evaluate candidates against requirements. Otherwise, keyword matching will be used.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => props.setAiScreening(!props.aiScreening)}
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none ${
+                props.aiScreening ? "bg-violet-600" : "bg-zinc-200 dark:bg-zinc-800"
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-300 ease-in-out ${
+                  props.aiScreening ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
         </div>
 
         <button

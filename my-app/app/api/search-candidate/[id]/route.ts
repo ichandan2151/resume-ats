@@ -1,6 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { extractKeywordsFromJobDescription, calculateMatchScore } from "@/lib/openai";
+import { parseCampaignDescription, encodeCampaignDescription } from "@/lib/campaign";
+import { retryInBackground } from "@/app/api/resumes/[id]/retry/route";
 
 export const runtime = "nodejs";
 
@@ -27,23 +29,23 @@ export async function GET(
 
   let enrichedDescription = job.description;
   let jobKeywords: string[] = [];
+  let aiScreening = false;
 
   if (job.description) {
-    const parts = job.description.split("---KEYWORDS---");
-    if (parts.length > 1) {
-      try {
-        jobKeywords = JSON.parse(parts[1].trim());
-      } catch (e) {}
-    }
+    const parsed = parseCampaignDescription(job.description);
+    jobKeywords = parsed.keywords;
+    aiScreening = parsed.aiScreening;
+    enrichedDescription = parsed.descriptionText;
 
     // Self-heal if delimiter is missing or keywords array is empty
-    if (parts.length === 1 || !Array.isArray(jobKeywords) || jobKeywords.length === 0) {
+    if (jobKeywords.length === 0) {
       try {
-        const cleanDesc = parts[0].trim();
+        const cleanDesc = enrichedDescription || job.description;
         const contextText = `Title: ${job.title || ""}\nDescription: ${cleanDesc}`;
         const keywords = await extractKeywordsFromJobDescription(contextText);
         
-        enrichedDescription = `${cleanDesc}\n\n---KEYWORDS---\n${JSON.stringify(keywords)}`;
+        enrichedDescription = encodeCampaignDescription(cleanDesc, keywords, aiScreening);
+        jobKeywords = keywords;
         
         await supabase
           .from("jobs")
@@ -54,44 +56,71 @@ export async function GET(
         if (keywords.length > 0) {
           const { data: campaignResumes } = await supabase
             .from("resumes")
-            .select("id, parsed_json, original_filename")
+            .select("id, parsed_json, original_filename, extracted_text, storage_bucket, storage_path")
             .eq("job_id", id);
             
           if (campaignResumes && campaignResumes.length > 0) {
-            for (const resume of campaignResumes) {
-              const candidateKeywords = [
-                ...(resume.parsed_json?.keywords || resume.parsed_json?.skills || [])
-              ].map((k: any) => String(k).toLowerCase().trim());
-
-              const { score, matched, missing } = calculateMatchScore(
-                keywords,
-                candidateKeywords,
-                resume.parsed_json?.years_experience
-              );
-              
-              const score_breakdown = {
-                relevance: `Matched ${matched.length} out of ${keywords.length} job keywords.`,
-                strengths: matched,
-                weaknesses: missing,
-              };
-              
-              const updatedParsed = {
-                ...(resume.parsed_json || {}),
-                scoring: {
-                  score,
-                  breakdown: score_breakdown,
-                }
-              };
-              
+            if (aiScreening) {
+              // Mark candidates as processing and score in background
               await supabase
                 .from("resumes")
                 .update({
-                  score,
-                  score_breakdown,
-                  scoring_version: "keyword-1.0",
-                  parsed_json: updatedParsed
+                  status: "uploaded",
+                  score: null,
+                  score_breakdown: {},
+                  scoring_version: "ai-1.0",
                 })
-                .eq("id", resume.id);
+                .eq("job_id", id);
+
+              after(() => {
+                for (const resume of campaignResumes) {
+                  retryInBackground(
+                    auth.user.id,
+                    id,
+                    resume.id,
+                    resume.extracted_text,
+                    resume.storage_bucket || "resumes",
+                    resume.storage_path || ""
+                  ).catch(console.error);
+                }
+              });
+            } else {
+              for (const resume of campaignResumes) {
+                const candidateKeywords = [
+                  ...(resume.parsed_json?.keywords || resume.parsed_json?.skills || [])
+                ].map((k: any) => String(k).toLowerCase().trim());
+
+                const { score, matched, missing } = calculateMatchScore(
+                  keywords,
+                  candidateKeywords,
+                  resume.parsed_json?.years_experience
+                );
+                
+                const score_breakdown = {
+                  relevance: `Matched ${matched.length} out of ${keywords.length} job keywords.`,
+                  strengths: matched,
+                  weaknesses: missing,
+                };
+                
+                const updatedParsed = {
+                  ...(resume.parsed_json || {}),
+                  scoring: {
+                    score,
+                    breakdown: score_breakdown,
+                  }
+                };
+                
+                await supabase
+                  .from("resumes")
+                  .update({
+                    score,
+                    score_breakdown,
+                    scoring_version: "keyword-1.0",
+                    status: "scored",
+                    parsed_json: updatedParsed
+                  })
+                  .eq("id", resume.id);
+              }
             }
           }
         }
@@ -105,6 +134,8 @@ export async function GET(
     data: {
       ...job,
       description: enrichedDescription,
+      keywords: jobKeywords,
+      ai_screening: aiScreening,
     }
   });
 }
@@ -225,4 +256,158 @@ export async function DELETE(
   }
 
   return NextResponse.json({ success: true });
+}
+
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  const supabase = await createSupabaseServerClient();
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const body = await req.json();
+  const title = body?.title !== undefined ? String(body.title).trim() : undefined;
+  const company = body?.company !== undefined ? String(body.company).trim() : undefined;
+  const location = body?.location !== undefined ? String(body.location).trim() : undefined;
+  const descriptionText = body?.description !== undefined ? String(body.description).trim() : undefined;
+  const aiScreening = body?.aiScreening !== undefined ? body.aiScreening === true : undefined;
+
+  // Fetch current job details
+  const { data: job, error: fetchErr } = await supabase
+    .from("jobs")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (fetchErr || !job) {
+    return NextResponse.json({ error: "Job campaign not found" }, { status: 404 });
+  }
+
+  const currentData = parseCampaignDescription(job.description);
+
+  // Update fields if provided
+  const updatedTitle = title !== undefined ? title : job.title;
+  const updatedCompany = company !== undefined ? company : job.company;
+  const updatedLocation = location !== undefined ? location : job.location;
+  const updatedDescText = descriptionText !== undefined ? descriptionText : currentData.descriptionText;
+  const updatedAiScreening = aiScreening !== undefined ? aiScreening : currentData.aiScreening;
+
+  // Extract new keywords if descriptionText or title changed
+  let updatedKeywords = currentData.keywords;
+  if (descriptionText !== undefined || title !== undefined || currentData.keywords.length === 0) {
+    updatedKeywords = await extractKeywordsFromJobDescription(`Title: ${updatedTitle}\nDescription: ${updatedDescText}`);
+  }
+
+  const newDescriptionEncoded = encodeCampaignDescription(updatedDescText, updatedKeywords, updatedAiScreening);
+
+  // Update the jobs table
+  const { data: updatedJob, error: updateErr } = await supabase
+    .from("jobs")
+    .update({
+      title: updatedTitle,
+      company: updatedCompany || null,
+      location: updatedLocation || null,
+      description: newDescriptionEncoded,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (updateErr) {
+    return NextResponse.json({ error: updateErr.message }, { status: 500 });
+  }
+
+  // Check if we need to re-score candidates (e.g. if keywords or aiScreening toggle changed)
+  const screeningModeChanged = aiScreening !== undefined && aiScreening !== currentData.aiScreening;
+  const descriptionChanged = descriptionText !== undefined || title !== undefined;
+
+  if (screeningModeChanged || descriptionChanged) {
+    // Re-score all candidates
+    const { data: resumes } = await supabase
+      .from("resumes")
+      .select("id, extracted_text, parsed_json, original_filename, storage_bucket, storage_path")
+      .eq("job_id", id);
+
+    if (resumes && resumes.length > 0) {
+      if (updatedAiScreening) {
+        // AI screening enabled: reset status to uploaded and run in background
+        await supabase
+          .from("resumes")
+          .update({
+            status: "uploaded",
+            score: null,
+            score_breakdown: {},
+            scoring_version: "ai-1.0",
+          })
+          .eq("job_id", id);
+
+        // Run background screening
+        after(() => {
+          for (const r of resumes) {
+            retryInBackground(
+              auth.user.id,
+              id,
+              r.id,
+              r.extracted_text,
+              r.storage_bucket || "resumes",
+              r.storage_path || ""
+            ).catch(console.error);
+          }
+        });
+      } else {
+        // Keyword matching: compute scores locally and update instantly
+        for (const r of resumes) {
+          const candidateKeywords = [
+            ...(r.parsed_json?.keywords || r.parsed_json?.skills || [])
+          ].map((k: any) => String(k).toLowerCase().trim());
+
+          const { score, matched, missing } = calculateMatchScore(
+            updatedKeywords,
+            candidateKeywords,
+            r.parsed_json?.years_experience
+          );
+
+          const score_breakdown = {
+            relevance: `Matched ${matched.length} out of ${updatedKeywords.length} job keywords.`,
+            strengths: matched,
+            weaknesses: missing,
+          };
+
+          const updatedParsed = {
+            ...(r.parsed_json || {}),
+            scoring: {
+              score,
+              breakdown: score_breakdown,
+            },
+          };
+
+          await supabase
+            .from("resumes")
+            .update({
+              score,
+              score_breakdown,
+              scoring_version: "keyword-1.0",
+              status: "scored",
+              parsed_json: updatedParsed,
+            })
+            .eq("id", r.id);
+        }
+      }
+    }
+  }
+
+  return NextResponse.json({
+    success: true,
+    data: {
+      ...updatedJob,
+      description: updatedDescText,
+      keywords: updatedKeywords,
+      ai_screening: updatedAiScreening,
+    }
+  });
 }

@@ -1,6 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { extractKeywordsFromJobDescription, calculateMatchScore } from "@/lib/openai";
+import { parseCampaignDescription, encodeCampaignDescription } from "@/lib/campaign";
+import { retryInBackground } from "@/app/api/resumes/[id]/retry/route";
 
 export const runtime = "nodejs";
 
@@ -93,6 +95,7 @@ export async function POST(req: Request) {
 
   const title = String(body?.title ?? "").trim();
   const description = String(body?.description ?? "").trim();
+  const aiScreening = body?.aiScreening === true; // defaults to false if not sent, or can default to true
 
   if (!title) {
     return NextResponse.json(
@@ -110,7 +113,7 @@ export async function POST(req: Request) {
 
   // 1) Extract job keywords and enrich job description
   const jobKeywords = await extractKeywordsFromJobDescription(`Title: ${title}\nDescription: ${description}`);
-  const descriptionWithKeywords = `${description}\n\n---KEYWORDS---\n${JSON.stringify(jobKeywords)}`;
+  const descriptionWithKeywords = encodeCampaignDescription(description, jobKeywords, aiScreening);
 
   const { data, error } = await supabase
     .from("jobs")
@@ -173,8 +176,31 @@ export async function POST(req: Request) {
       }
     }
 
-    // 3) Perform programmatic keyword matching and prepare bulk inserts
+    // 3) Perform programmatic keyword matching or prepare AI scoring background tasks
     const rowsToInsert = uniqueCandidates.map((srcResume) => {
+      if (aiScreening) {
+        return {
+          owner_id: auth.user.id,
+          job_id: jobId,
+          source: srcResume.source || "upload",
+          original_filename: srcResume.original_filename,
+          storage_bucket: srcResume.storage_bucket,
+          storage_path: srcResume.storage_path,
+          mime_type: srcResume.mime_type,
+          file_size_bytes: srcResume.file_size_bytes,
+          full_name: srcResume.full_name,
+          email: srcResume.email,
+          phone: srcResume.phone,
+          location: srcResume.location,
+          extracted_text: srcResume.extracted_text,
+          parsed_json: srcResume.parsed_json,
+          status: "uploaded",
+          score: null,
+          score_breakdown: {},
+          scoring_version: "ai-1.0",
+        };
+      }
+
       const candidateKeywords = [
         ...(srcResume.parsed_json?.keywords || srcResume.parsed_json?.skills || [])
       ].map((k: any) => String(k).toLowerCase().trim());
@@ -222,11 +248,27 @@ export async function POST(req: Request) {
     });
 
     if (rowsToInsert.length > 0) {
-      const { error: insErr } = await supabase
+      const { data: insertedRows, error: insErr } = await supabase
         .from("resumes")
-        .insert(rowsToInsert);
+        .insert(rowsToInsert)
+        .select("id, extracted_text, storage_bucket, storage_path");
+
       if (insErr) {
         console.error("Failed to bulk insert matched candidates:", insErr.message);
+      } else if (aiScreening && insertedRows) {
+        // Trigger background screening using after()
+        after(() => {
+          for (const row of insertedRows) {
+            retryInBackground(
+              auth.user.id,
+              jobId,
+              row.id,
+              row.extracted_text,
+              row.storage_bucket || "resumes",
+              row.storage_path || ""
+            ).catch(console.error);
+          }
+        });
       }
     }
   }

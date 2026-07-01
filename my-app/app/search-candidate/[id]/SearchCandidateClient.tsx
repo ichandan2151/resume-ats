@@ -34,6 +34,7 @@ type SearchCandidate = {
   location: string | null;
   description: string;
   created_at: string;
+  ai_screening: boolean;
 };
 
 export default function SearchCandidateClient({ id }: { id: string }) {
@@ -41,6 +42,37 @@ export default function SearchCandidateClient({ id }: { id: string }) {
   const [selectedSearchResumeIds, setSelectedSearchResumeIds] = useState<Set<string>>(new Set());
   const [deleteMultipleOpen, setDeleteMultipleOpen] = useState(false);
   const [searchCandidate, setSearchCandidate] = useState<SearchCandidate | null>(null);
+  const [togglingAi, setTogglingAi] = useState(false);
+
+  const handleToggleAiScreening = async () => {
+    if (!searchCandidate) return;
+    setTogglingAi(true);
+    setErr(null);
+    try {
+      const newMode = !searchCandidate.ai_screening;
+      const res = await fetch(`/api/search-candidate/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          aiScreening: newMode,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json?.error ?? "Failed to toggle AI screening");
+      }
+
+      setSearchCandidate(json.data);
+      await refreshResumes(page);
+    } catch (e: any) {
+      setErr(e.message ?? "Error toggling AI screening");
+    } finally {
+      setTogglingAi(false);
+    }
+  };
   const [showTour, setShowTour] = useState(false);
   const [tourStep, setTourStep] = useState(0);
   const [existingIdentifiers, setExistingIdentifiers] = useState<{ email: string | null; original_filename: string }[]>([]);
@@ -454,6 +486,27 @@ export default function SearchCandidateClient({ id }: { id: string }) {
                 </svg>
                 Avg Score: {avgScore == null ? "-" : avgScore.toFixed(1)}
               </div>
+
+              {/* Interactive AI Screening Toggle */}
+              <button
+                onClick={handleToggleAiScreening}
+                disabled={togglingAi}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-semibold border cursor-pointer select-none transition-all duration-300 ${
+                  searchCandidate?.ai_screening
+                    ? "bg-violet-500/10 dark:bg-violet-500/20 text-violet-700 dark:text-violet-300 border-violet-500/30 hover:bg-violet-500/20"
+                    : "bg-zinc-500/10 hover:bg-zinc-500/20 text-zinc-700 dark:text-zinc-300 border-zinc-500/30"
+                } disabled:opacity-60`}
+                title="Toggle between AI-powered screening and local keyword matching"
+              >
+                <span>🤖</span>
+                AI Screening: {searchCandidate?.ai_screening ? "ON" : "OFF"}
+                {togglingAi && (
+                  <svg className="h-3 w-3 animate-spin text-current" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                )}
+              </button>
             </div>
           </div>
 
