@@ -287,6 +287,8 @@ export default function SearchCandidateClient({ id }: { id: string }) {
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [displayLimit, setDisplayLimit] = useState<5 | 10 | 20 | "all">("all");
   const [copyPopupCandidate, setCopyPopupCandidate] = useState<ResumeRow | null>(null);
+  const [drawerCandidate, setDrawerCandidate] = useState<ResumeRow | null>(null);
+  const [drawerTab, setDrawerTab] = useState<"screening" | "log">("screening");
 
   const total = totalCount;
   const avgScore = serverAvgScore;
@@ -789,6 +791,7 @@ export default function SearchCandidateClient({ id }: { id: string }) {
                     }}
                     onRetry={retryResume}
                     onShowCopyPopup={setCopyPopupCandidate}
+                    onCallCandidate={(c) => { setDrawerCandidate(c); setDrawerTab("screening"); }}
                   />
                 ))}
               </div>
@@ -1013,6 +1016,15 @@ export default function SearchCandidateClient({ id }: { id: string }) {
             open={!!copyPopupCandidate}
             onClose={() => setCopyPopupCandidate(null)}
             candidate={copyPopupCandidate}
+          />
+        )}
+        {drawerCandidate && (
+          <CandidateDrawer
+            candidate={drawerCandidate}
+            jobId={id}
+            activeTab={drawerTab}
+            onTabChange={setDrawerTab}
+            onClose={() => setDrawerCandidate(null)}
           />
         )}
         </>
@@ -2056,6 +2068,7 @@ type CandidateCardProps = {
   onToggleExpand: (id: string) => void;
   onRetry: (id: string) => void;
   onShowCopyPopup: (candidate: ResumeRow) => void;
+  onCallCandidate: (candidate: ResumeRow) => void;
 };
 
 const MatchDetails = React.memo(({ candidate, isExpanded, isRetrying, onRetry }: { candidate: ResumeRow; isExpanded: boolean; isRetrying: boolean; onRetry: (id: string) => void }) => {
@@ -2374,7 +2387,7 @@ const MatchDetails = React.memo(({ candidate, isExpanded, isRetrying, onRetry }:
 
 MatchDetails.displayName = "MatchDetails";
 
-const CandidateCardModern = React.memo(({ candidate, idx, isSelected, isExpanded, isRetrying, onToggleSelect, onToggleExpand, onRetry, onShowCopyPopup }: CandidateCardProps) => {
+const CandidateCardModern = React.memo(({ candidate, idx, isSelected, isExpanded, isRetrying, onToggleSelect, onToggleExpand, onRetry, onShowCopyPopup, onCallCandidate }: CandidateCardProps) => {
   const r = candidate;
   return (
     <div className="candidate-card-deferred card-modern" data-id={r.id}>
@@ -2514,22 +2527,40 @@ const CandidateCardModern = React.memo(({ candidate, idx, isSelected, isExpanded
               </svg>
             </button>
 
-            <a
-              href={`/api/resumes/${r.id}/view`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`inline-flex items-center gap-1 rounded-xl px-3.5 py-1.5 text-xs font-bold shadow-sm transition-all duration-200 border ${
-                r.status === "uploaded"
-                  ? "border-zinc-200 dark:border-zinc-800 bg-zinc-100/50 dark:bg-zinc-800/50 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
-                  : "border-violet-200 dark:border-violet-800 bg-violet-500 text-white hover:bg-violet-600 hover:shadow-md cursor-pointer hover:-translate-y-0.5"
-              }`}
-              onClick={(e) => { if (r.status === "uploaded") e.preventDefault(); }}
-            >
-              View Resume
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
-            </a>
+            <div className="flex items-center gap-2">
+              {(r.phone || r.parsed_json?.phone) && (
+                <button
+                  onClick={() => onCallCandidate(r)}
+                  disabled={r.status === "uploaded"}
+                  className={`inline-flex items-center gap-1 rounded-xl px-3.5 py-1.5 text-xs font-bold shadow-sm transition-all duration-200 border ${
+                    r.status === "uploaded"
+                      ? "border-zinc-200 dark:border-zinc-800 bg-zinc-100/50 dark:bg-zinc-800/50 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
+                      : "border-emerald-200 dark:border-emerald-800 bg-emerald-500 text-white hover:bg-emerald-600 hover:shadow-md cursor-pointer hover:-translate-y-0.5"
+                  }`}
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                  </svg>
+                  Call
+                </button>
+              )}
+              <a
+                href={`/api/resumes/${r.id}/view`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`inline-flex items-center gap-1 rounded-xl px-3.5 py-1.5 text-xs font-bold shadow-sm transition-all duration-200 border ${
+                  r.status === "uploaded"
+                    ? "border-zinc-200 dark:border-zinc-800 bg-zinc-100/50 dark:bg-zinc-800/50 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
+                    : "border-violet-200 dark:border-violet-800 bg-violet-500 text-white hover:bg-violet-600 hover:shadow-md cursor-pointer hover:-translate-y-0.5"
+                }`}
+                onClick={(e) => { if (r.status === "uploaded") e.preventDefault(); }}
+              >
+                View Resume
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+              </a>
+            </div>
           </div>
         </div>
       </div>
@@ -2704,3 +2735,509 @@ function CopyContactModal({
   );
 }
 
+const DEFAULT_SCREENING_QUESTIONS = [
+  "Do you require visa sponsorship to work in the United States?",
+  "What is your current work authorization status?",
+  "What is your earliest available start date?",
+  "What are your salary expectations for this role?",
+  "Are you open to relocation if required?",
+];
+
+type VoiceCallRow = {
+  id: string;
+  vapi_call_id: string;
+  candidate_name: string;
+  candidate_phone: string;
+  status: string;
+  questions: string[];
+  answers: Record<string, string> | null;
+  transcript: string | null;
+  summary: string | null;
+  call_duration_seconds: number | null;
+  cost: number | null;
+  ended_reason: string | null;
+  created_at: string;
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  queued: "Queued",
+  ringing: "Ringing",
+  "in-progress": "In Progress",
+  ended: "Completed",
+  failed: "Failed",
+};
+
+const STATUS_COLOR: Record<string, string> = {
+  queued: "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800",
+  ringing: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800",
+  "in-progress": "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800",
+  ended: "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800",
+  failed: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800",
+};
+
+function CandidateDrawer({
+  candidate,
+  jobId,
+  activeTab,
+  onTabChange,
+  onClose,
+}: {
+  candidate: ResumeRow;
+  jobId: string;
+  activeTab: "screening" | "log";
+  onTabChange: (tab: "screening" | "log") => void;
+  onClose: () => void;
+}) {
+  const phone = candidate.phone || candidate.parsed_json?.phone;
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div className="fixed inset-0 z-[90] bg-black/30 backdrop-blur-[2px] transition-opacity" onClick={onClose} />
+
+      {/* Drawer */}
+      <div className="fixed inset-y-0 right-0 z-[100] w-full max-w-xl flex flex-col bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl animate-[slideIn_0.2s_ease-out]">
+        {/* Header */}
+        <div className="shrink-0 border-b border-zinc-200 dark:border-zinc-800">
+          <div className="flex items-center justify-between px-6 pt-5 pb-3">
+            <div className="min-w-0">
+              <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 truncate">
+                {candidate.full_name || "Unknown Candidate"}
+              </h2>
+              <div className="flex items-center gap-3 mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                {candidate.email && (
+                  <span className="truncate">{candidate.email}</span>
+                )}
+                {phone && (
+                  <span className="shrink-0">{phone}</span>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="shrink-0 ml-4 rounded-lg p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition cursor-pointer"
+            >
+              <svg className="w-5 h-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex px-6 gap-1">
+            {([
+              { key: "screening" as const, label: "Screening Call", icon: "M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" },
+              { key: "log" as const, label: "Call Log", icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" },
+            ]).map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => onTabChange(tab.key)}
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold border-b-2 transition cursor-pointer ${
+                  activeTab === tab.key
+                    ? "border-violet-500 text-violet-600 dark:text-violet-400"
+                    : "border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300"
+                }`}
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={tab.icon} />
+                </svg>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Tab content */}
+        <div className="flex-1 overflow-y-auto">
+          {activeTab === "screening" && (
+            <ScreeningTab candidate={candidate} jobId={jobId} phone={phone} onCallStarted={() => onTabChange("log")} />
+          )}
+          {activeTab === "log" && (
+            <CallLogTab candidate={candidate} />
+          )}
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes slideIn {
+          from { transform: translateX(100%); }
+          to { transform: translateX(0); }
+        }
+      `}</style>
+    </>
+  );
+}
+
+function ScreeningTab({
+  candidate,
+  jobId,
+  phone,
+  onCallStarted,
+}: {
+  candidate: ResumeRow;
+  jobId: string;
+  phone: string | null;
+  onCallStarted: () => void;
+}) {
+  const [questions, setQuestions] = useState<string[]>(DEFAULT_SCREENING_QUESTIONS.slice(0, 3));
+  const [newQuestion, setNewQuestion] = useState("");
+  const [calling, setCalling] = useState(false);
+  const [callStatus, setCallStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
+
+  const startCall = async () => {
+    if (!questions.length) {
+      setError("Add at least one question");
+      return;
+    }
+    setCalling(true);
+    setError(null);
+    setCallStatus("queued");
+
+    try {
+      const res = await fetch("/api/voice-call", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resumeId: candidate.id, jobId, questions }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to initiate call");
+
+      const voiceCallId = json.data.id;
+
+      pollRef.current = setInterval(async () => {
+        try {
+          const pollRes = await fetch(`/api/voice-call/${voiceCallId}`);
+          const pollJson = await pollRes.json();
+          if (pollRes.ok && pollJson.data) {
+            setCallStatus(pollJson.data.status);
+            if (pollJson.data.status === "ended" || pollJson.data.status === "failed") {
+              setCalling(false);
+              if (pollRef.current) clearInterval(pollRef.current);
+              // Switch to call log to see results
+              setTimeout(() => onCallStarted(), 500);
+            }
+          }
+        } catch {}
+      }, 3000);
+    } catch (err: any) {
+      setError(err.message);
+      setCalling(false);
+      setCallStatus(null);
+    }
+  };
+
+  const addQuestion = () => {
+    const q = newQuestion.trim();
+    if (!q) return;
+    setQuestions((prev) => [...prev, q]);
+    setNewQuestion("");
+  };
+
+  const removeQuestion = (idx: number) => {
+    setQuestions((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  return (
+    <div className="p-6 space-y-5">
+      {/* Live call status */}
+      {callStatus && (
+        <div className={`flex items-center gap-2 p-3 rounded-xl border ${STATUS_COLOR[callStatus] || "bg-zinc-50 border-zinc-200 text-zinc-600"}`}>
+          {callStatus !== "ended" && callStatus !== "failed" && (
+            <div className="w-2.5 h-2.5 rounded-full bg-current animate-pulse" />
+          )}
+          {callStatus === "ended" && (
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          )}
+          <span className="text-sm font-semibold">
+            {STATUS_LABEL[callStatus] || callStatus}
+          </span>
+          {callStatus === "ended" && (
+            <span className="text-xs ml-auto opacity-70">Switching to Call Log...</span>
+          )}
+        </div>
+      )}
+
+      {/* Questions */}
+      <div>
+        <h4 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 mb-3">Questions to ask</h4>
+        <div className="space-y-2">
+          {questions.map((q, i) => (
+            <div key={i} className="flex items-start gap-2 bg-zinc-50 dark:bg-zinc-800/50 rounded-xl p-3 border border-zinc-200 dark:border-zinc-700 group">
+              <span className="text-xs font-bold text-violet-600 dark:text-violet-400 mt-0.5 shrink-0 w-5 text-center">{i + 1}.</span>
+              <span className="text-sm text-zinc-700 dark:text-zinc-300 flex-1">{q}</span>
+              <button
+                onClick={() => removeQuestion(i)}
+                disabled={calling}
+                className="text-zinc-300 dark:text-zinc-600 group-hover:text-zinc-400 dark:group-hover:text-zinc-500 hover:!text-red-500 transition shrink-0 cursor-pointer disabled:opacity-40"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          ))}
+          {questions.length === 0 && (
+            <p className="text-sm text-zinc-400 dark:text-zinc-500 text-center py-4">No questions added yet</p>
+          )}
+        </div>
+      </div>
+
+      {/* Add question */}
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={newQuestion}
+          onChange={(e) => setNewQuestion(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") addQuestion(); }}
+          placeholder="Type a custom question..."
+          disabled={calling}
+          className="flex-1 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3.5 py-2.5 text-sm text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-violet-500/30 disabled:opacity-40"
+        />
+        <button
+          onClick={addQuestion}
+          disabled={calling || !newQuestion.trim()}
+          className="rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-500 text-white px-4 py-2.5 text-sm font-semibold hover:bg-violet-600 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Add
+        </button>
+      </div>
+
+      {/* Quick-add presets */}
+      {DEFAULT_SCREENING_QUESTIONS.filter((q) => !questions.includes(q)).length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-zinc-400 dark:text-zinc-500 mb-2">Suggested questions:</p>
+          <div className="flex flex-wrap gap-1.5">
+            {DEFAULT_SCREENING_QUESTIONS.filter((q) => !questions.includes(q)).map((q) => (
+              <button
+                key={q}
+                onClick={() => setQuestions((prev) => [...prev, q])}
+                disabled={calling}
+                className="text-xs rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800/50 px-2.5 py-1.5 text-zinc-500 dark:text-zinc-400 hover:border-violet-400 dark:hover:border-violet-600 hover:text-violet-600 dark:hover:text-violet-400 transition cursor-pointer disabled:opacity-40"
+              >
+                + {q.length > 45 ? q.slice(0, 45) + "..." : q}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 rounded-xl p-3 border border-red-200 dark:border-red-800">
+          {error}
+        </div>
+      )}
+
+      {/* Start call button */}
+      <div className="pt-2">
+        <button
+          onClick={startCall}
+          disabled={calling || !phone || questions.length === 0}
+          className="w-full rounded-xl bg-emerald-500 text-white py-3 text-sm font-bold hover:bg-emerald-600 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2 shadow-sm"
+        >
+          {calling ? (
+            <>
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              Calling {candidate.full_name || "candidate"}...
+            </>
+          ) : (
+            <>
+              <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+              </svg>
+              Start Screening Call
+            </>
+          )}
+        </button>
+        {!phone && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 text-center mt-2">No phone number available for this candidate</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CallLogTab({ candidate }: { candidate: ResumeRow }) {
+  const [calls, setCalls] = useState<VoiceCallRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedCallId, setExpandedCallId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchCalls();
+  }, [candidate.id]);
+
+  const fetchCalls = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/voice-call?resumeId=${candidate.id}`);
+      const json = await res.json();
+      if (res.ok) {
+        setCalls(json.data || []);
+        // Auto-expand the most recent call
+        if (json.data?.length > 0) {
+          setExpandedCallId(json.data[0].id);
+        }
+      }
+    } catch {} finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <div className="w-6 h-6 border-2 border-violet-300 border-t-violet-600 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (calls.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+        <div className="w-12 h-12 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center mb-3">
+          <svg className="w-6 h-6 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+          </svg>
+        </div>
+        <p className="text-sm font-medium text-zinc-600 dark:text-zinc-400">No calls yet</p>
+        <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">Start a screening call from the Screening Call tab</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-4 space-y-3">
+      <div className="flex items-center justify-between px-2 mb-1">
+        <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
+          {calls.length} call{calls.length !== 1 ? "s" : ""}
+        </span>
+        <button
+          onClick={fetchCalls}
+          className="text-xs text-violet-600 dark:text-violet-400 hover:text-violet-700 dark:hover:text-violet-300 font-semibold cursor-pointer"
+        >
+          Refresh
+        </button>
+      </div>
+
+      {calls.map((call) => {
+        const isExpanded = expandedCallId === call.id;
+        const date = new Date(call.created_at);
+        const timeStr = date.toLocaleString("en-US", {
+          month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true,
+        });
+
+        return (
+          <div key={call.id} className="border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden bg-white dark:bg-zinc-900/50">
+            {/* Call header - always visible */}
+            <button
+              onClick={() => setExpandedCallId(isExpanded ? null : call.id)}
+              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition cursor-pointer text-left"
+            >
+              <div className={`shrink-0 w-2 h-2 rounded-full ${
+                call.status === "ended" ? "bg-emerald-500" :
+                call.status === "failed" ? "bg-red-500" :
+                "bg-amber-500 animate-pulse"
+              }`} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-md border ${STATUS_COLOR[call.status] || "bg-zinc-100 text-zinc-600 border-zinc-200"}`}>
+                    {STATUS_LABEL[call.status] || call.status}
+                  </span>
+                  {call.call_duration_seconds != null && (
+                    <span className="text-xs text-zinc-400">
+                      {Math.floor(call.call_duration_seconds / 60)}m {call.call_duration_seconds % 60}s
+                    </span>
+                  )}
+                  {call.cost != null && (
+                    <span className="text-xs text-zinc-400">${Number(call.cost).toFixed(3)}</span>
+                  )}
+                </div>
+                <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">{timeStr}</p>
+              </div>
+              <svg className={`w-4 h-4 text-zinc-400 transition-transform ${isExpanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {/* Expanded content */}
+            {isExpanded && (
+              <div className="border-t border-zinc-100 dark:border-zinc-800 px-4 py-4 space-y-4">
+                {/* Questions asked */}
+                {call.questions?.length > 0 && (
+                  <div>
+                    <h5 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-2">Questions Asked</h5>
+                    <ol className="space-y-1">
+                      {call.questions.map((q: string, i: number) => (
+                        <li key={i} className="text-sm text-zinc-600 dark:text-zinc-400 flex gap-2">
+                          <span className="text-violet-500 font-semibold shrink-0">{i + 1}.</span>
+                          {q}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+
+                {/* Summary */}
+                {call.summary && (
+                  <div>
+                    <h5 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-2">Summary</h5>
+                    <p className="text-sm text-zinc-700 dark:text-zinc-300 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg p-3 border border-zinc-200 dark:border-zinc-700 leading-relaxed">
+                      {call.summary}
+                    </p>
+                  </div>
+                )}
+
+                {/* Extracted answers */}
+                {call.answers && Object.keys(call.answers).length > 0 && (
+                  <div>
+                    <h5 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-2">Extracted Answers</h5>
+                    <div className="space-y-2">
+                      {Object.entries(call.answers).map(([key, val]) => (
+                        <div key={key} className="bg-violet-50 dark:bg-violet-950/20 rounded-lg p-3 border border-violet-200 dark:border-violet-800/50">
+                          <div className="text-xs font-semibold text-violet-600 dark:text-violet-400 mb-0.5">{key}</div>
+                          <div className="text-sm text-zinc-700 dark:text-zinc-300">{String(val)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Transcript */}
+                {call.transcript && (
+                  <div>
+                    <h5 className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-2">Transcript</h5>
+                    <pre className="text-xs text-zinc-600 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg p-3 border border-zinc-200 dark:border-zinc-700 whitespace-pre-wrap max-h-64 overflow-y-auto font-sans leading-relaxed">
+                      {call.transcript}
+                    </pre>
+                  </div>
+                )}
+
+                {/* No data yet */}
+                {call.status !== "ended" && !call.summary && !call.transcript && (
+                  <p className="text-sm text-zinc-400 dark:text-zinc-500 text-center py-2">
+                    {call.status === "failed" ? "Call failed — no data available" : "Call in progress — data will appear when complete"}
+                  </p>
+                )}
+
+                {call.status === "ended" && !call.summary && !call.transcript && (
+                  <p className="text-sm text-zinc-400 dark:text-zinc-500 text-center py-2">
+                    No transcript or summary available for this call
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}

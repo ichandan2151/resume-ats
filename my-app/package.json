@@ -12,6 +12,7 @@
     "@google/generative-ai": "^0.24.1",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.93.2",
+    "@vapi-ai/server-sdk": "^1.2.0",
     "dommatrix": "^0.1.1",
     "jszip": "^3.10.1",
     "mammoth": "^1.11.0",
