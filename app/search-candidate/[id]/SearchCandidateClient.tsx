@@ -765,39 +765,33 @@ export default function SearchCandidateClient({ id }: { id: string }) {
                     className="h-3.5 w-3.5 rounded border-zinc-300 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-violet-600 focus:ring-violet-500 cursor-pointer"
                   />
                   {selectedSearchResumeIds.size > 0 ? (
-                    <div className="flex items-center gap-2.5">
-                      <span className="font-bold text-zinc-800 dark:text-zinc-200">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-semibold text-xs text-zinc-800 dark:text-zinc-200 mr-1">
                         {selectedSearchResumeIds.size} selected
                       </span>
-                      <span className="text-zinc-300 dark:text-zinc-700">|</span>
                       <button
                         type="button"
                         onClick={() => setDeleteMultipleOpen(true)}
-                        className="text-red-600 dark:text-red-400 hover:underline cursor-pointer font-semibold"
+                        className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-2.5 py-1.5 text-xs font-medium text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition cursor-pointer"
                       >
-                        Delete Selected
+                        Delete
                       </button>
-                      <span className="text-zinc-300 dark:text-zinc-700">|</span>
                       <button
                         type="button"
                         onClick={() => setBulkCallOpen(true)}
-                        className="text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer font-semibold"
+                        className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-2.5 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition cursor-pointer"
                       >
                         Bulk Call
                       </button>
                       {selectedSearchResumeIds.size >= 2 && selectedSearchResumeIds.size <= 5 && (
-                        <>
-                          <span className="text-zinc-300 dark:text-zinc-700">|</span>
-                          <button
-                            type="button"
-                            onClick={() => setCompareMode(true)}
-                            className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer font-semibold"
-                          >
-                            Compare
-                          </button>
-                        </>
+                        <button
+                          type="button"
+                          onClick={() => setCompareMode(true)}
+                          className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-2.5 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition cursor-pointer"
+                        >
+                          Compare
+                        </button>
                       )}
-                      <span className="text-zinc-300 dark:text-zinc-700">|</span>
                       <button
                         type="button"
                         onClick={async () => {
@@ -817,9 +811,15 @@ export default function SearchCandidateClient({ id }: { id: string }) {
                           } catch {} finally { setWorkflowRunning(false); }
                         }}
                         disabled={workflowRunning}
-                        className="text-purple-600 dark:text-purple-400 hover:underline cursor-pointer font-semibold disabled:opacity-50"
+                        className="rounded-lg bg-zinc-900 dark:bg-zinc-100 px-2.5 py-1.5 text-xs font-medium text-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-white transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
                       >
-                        {workflowRunning ? "Running AI Agent..." : "AI Workflow"}
+                        {workflowRunning && (
+                          <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                        )}
+                        {workflowRunning ? "Running..." : "AI Workflow"}
                       </button>
                     </div>
                   ) : (
@@ -5023,67 +5023,162 @@ function AIAnalyticsModal({ onClose }: { onClose: () => void }) {
 // WORKFLOW RESULT MODAL
 // ============================================
 function WorkflowResultModal({ data, onClose }: { data: any; onClose: () => void }) {
+  const TOOL_META: Record<string, { label: string; icon: string }> = {
+    parse_resume: { label: "Parse Resume", icon: "1" },
+    score_candidate: { label: "Score Candidate", icon: "2" },
+    generate_screening_questions: { label: "Generate Questions", icon: "3" },
+    generate_embedding: { label: "Embed for Search", icon: "4" },
+    decide_pipeline_stage: { label: "Pipeline Decision", icon: "5" },
+    draft_email: { label: "Draft Email", icon: "6" },
+  };
+
+  const successCount = Object.values(data.results).filter((r: any) => r.success).length;
+  const failCount = Object.values(data.results).length - successCount;
+
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl w-full max-w-3xl mx-4 max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-5 border-b border-zinc-100 dark:border-zinc-800">
-          <div>
-            <h3 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
-              AI Workflow Results
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300">Agentic</span>
-            </h3>
-            <p className="text-xs text-zinc-500 mt-0.5">
-              Processed {data.processedCount} candidate{data.processedCount !== 1 ? "s" : ""} in {(data.totalDurationMs / 1000).toFixed(1)}s
-            </p>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-100 dark:border-zinc-800">
+          <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-900 dark:bg-zinc-100">
+              <svg className="h-4 w-4 text-white dark:text-zinc-900" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">AI Workflow Complete</h3>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="text-xs text-zinc-400">{(data.totalDurationMs / 1000).toFixed(1)}s total</span>
+                <span className="text-zinc-200 dark:text-zinc-700">·</span>
+                <span className="text-xs text-emerald-600 dark:text-emerald-400">{successCount} passed</span>
+                {failCount > 0 && (
+                  <>
+                    <span className="text-zinc-200 dark:text-zinc-700">·</span>
+                    <span className="text-xs text-red-500">{failCount} failed</span>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
           <button onClick={onClose} className="rounded-lg p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition cursor-pointer">
-            <svg className="w-5 h-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            <svg className="w-4 h-4 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
 
-        <div className="p-5 overflow-y-auto flex-1 space-y-4">
-          {Object.entries(data.results).map(([resumeId, result]: [string, any]) => (
-            <div key={resumeId} className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-              <div className={`px-4 py-3 text-sm font-semibold flex items-center justify-between ${
-                result.success ? "bg-emerald-50 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-200" : "bg-red-50 dark:bg-red-950/20 text-red-800 dark:text-red-200"
-              }`}>
-                <span>Resume: {resumeId.slice(0, 8)}...</span>
-                <span className="text-xs">{result.success ? `${(result.durationMs / 1000).toFixed(1)}s` : result.error}</span>
-              </div>
-              {result.success && result.steps?.length > 0 && (
-                <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                  {result.steps.map((step: any, i: number) => (
-                    <div key={i} className="px-4 py-2.5 text-xs">
-                      <div className="flex items-center gap-3">
-                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${step.status === "success" ? "bg-emerald-500" : "bg-red-500"}`} />
-                        <span className="font-medium text-zinc-700 dark:text-zinc-300 w-44">{step.tool.replace(/_/g, " ")}</span>
-                        <span className="text-zinc-400">{step.durationMs}ms</span>
-                      </div>
-                      {/* Show email draft inline */}
-                      {step.tool === "draft_email" && step.status === "success" && step.output?.subject && (
-                        <div className="mt-2 ml-4 rounded-lg border border-violet-200 dark:border-violet-800 bg-violet-50/50 dark:bg-violet-950/20 p-3">
-                          <div className="font-semibold text-violet-800 dark:text-violet-300 mb-1">Subject: {step.output.subject}</div>
-                          <div className="text-zinc-600 dark:text-zinc-400 whitespace-pre-wrap">{step.output.body}</div>
-                          <div className="mt-1.5 text-[10px] text-violet-500">Saved as email template — find it in the Email tab</div>
-                        </div>
-                      )}
-                      {/* Show pipeline decision */}
-                      {step.tool === "decide_pipeline_stage" && step.status === "success" && step.output?.stage && (
-                        <div className="mt-2 ml-4 text-zinc-600 dark:text-zinc-400">
-                          Stage: <span className="font-semibold capitalize">{step.output.stage}</span> — {step.output.reasoning}
-                        </div>
+        {/* Results */}
+        <div className="p-4 overflow-y-auto flex-1 space-y-3">
+          {Object.entries(data.results).map(([resumeId, result]: [string, any], idx: number) => {
+            // Try to get candidate name from the parse step output
+            const parsedName = result.steps?.find((s: any) => s.tool === "parse_resume" && s.status === "success")?.output?.full_name;
+            const pipelineStep = result.steps?.find((s: any) => s.tool === "decide_pipeline_stage" && s.status === "success");
+            const scoreStep = result.steps?.find((s: any) => s.tool === "score_candidate" && s.status === "success");
+            const emailStep = result.steps?.find((s: any) => s.tool === "draft_email" && s.status === "success");
+
+            return (
+              <div key={resumeId} className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+                {/* Candidate Header */}
+                <div className="px-4 py-3 bg-zinc-50 dark:bg-zinc-900/50 flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className={`flex h-6 w-6 items-center justify-center rounded-md text-[10px] font-bold ${
+                      result.success
+                        ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
+                        : "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300"
+                    }`}>
+                      {result.success ? (
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+                      ) : (
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" /></svg>
                       )}
                     </div>
-                  ))}
+                    <div>
+                      <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                        {parsedName || `Candidate ${idx + 1}`}
+                      </span>
+                      {!result.success && (
+                        <span className="ml-2 text-xs text-red-500">{result.error}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {scoreStep?.output?.score != null && (
+                      <span className="rounded-md bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                        Score: {scoreStep.output.score}
+                      </span>
+                    )}
+                    {pipelineStep?.output?.stage && (
+                      <span className={`rounded-md px-2 py-0.5 text-xs font-medium capitalize ${
+                        pipelineStep.output.stage === "interview" ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300" :
+                        pipelineStep.output.stage === "screening" ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300" :
+                        pipelineStep.output.stage === "rejected" ? "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400" :
+                        "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300"
+                      }`}>
+                        {pipelineStep.output.stage}
+                      </span>
+                    )}
+                    {result.success && (
+                      <span className="text-[10px] text-zinc-400">{(result.durationMs / 1000).toFixed(1)}s</span>
+                    )}
+                  </div>
                 </div>
-              )}
-              {result.success && result.summary && (
-                <div className="px-4 py-3 bg-zinc-50 dark:bg-zinc-800/50 text-xs text-zinc-600 dark:text-zinc-400 whitespace-pre-wrap">
-                  {result.summary}
-                </div>
-              )}
-            </div>
-          ))}
+
+                {/* Steps Timeline */}
+                {result.success && result.steps?.length > 0 && (
+                  <div className="px-4 py-3 space-y-0">
+                    {result.steps.map((step: any, i: number) => {
+                      const meta = TOOL_META[step.tool] || { label: step.tool.replace(/_/g, " "), icon: String(i + 1) };
+                      const isLast = i === result.steps.length - 1;
+
+                      return (
+                        <div key={i} className="flex gap-3">
+                          {/* Timeline connector */}
+                          <div className="flex flex-col items-center">
+                            <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-bold ${
+                              step.status === "success"
+                                ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400"
+                                : "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400"
+                            }`}>
+                              {meta.icon}
+                            </div>
+                            {!isLast && (
+                              <div className="w-px h-full min-h-[16px] bg-zinc-200 dark:bg-zinc-800" />
+                            )}
+                          </div>
+
+                          {/* Step Content */}
+                          <div className={`flex-1 ${isLast ? "pb-0" : "pb-3"}`}>
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">{meta.label}</span>
+                              <span className="text-[10px] text-zinc-400">{step.durationMs}ms</span>
+                            </div>
+
+                            {/* Pipeline decision detail */}
+                            {step.tool === "decide_pipeline_stage" && step.status === "success" && step.output?.reasoning && (
+                              <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">{step.output.reasoning}</p>
+                            )}
+
+                            {/* Email draft detail */}
+                            {step.tool === "draft_email" && step.status === "success" && step.output?.subject && (
+                              <div className="mt-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/40 p-2.5">
+                                <div className="text-[11px] font-medium text-zinc-700 dark:text-zinc-300">{step.output.subject}</div>
+                                <div className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400 line-clamp-3 whitespace-pre-wrap">{step.output.body}</div>
+                                <div className="mt-1.5 text-[10px] text-zinc-400">Saved as email template</div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Summary */}
+                {result.success && result.summary && (
+                  <div className="px-4 py-2.5 border-t border-zinc-100 dark:border-zinc-800 text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                    {result.summary}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
