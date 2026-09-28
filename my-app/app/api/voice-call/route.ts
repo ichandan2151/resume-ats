@@ -56,6 +56,32 @@ export async function POST(req: NextRequest) {
     formattedPhone = "+1" + formattedPhone; // Default to US
   }
 
+  // Fetch job info for context in the call
+  let jobContext: { title?: string; company?: string; description?: string; location?: string } | undefined;
+  const effectiveJobId = jobId || resume.job_id;
+  if (effectiveJobId) {
+    const { data: job } = await supabase
+      .from("jobs")
+      .select("title, company, location, description")
+      .eq("id", effectiveJobId)
+      .single();
+    if (job) {
+      // Extract clean description (strip keywords/AI screening metadata)
+      let desc = job.description || "";
+      const kwIdx = desc.indexOf("---KEYWORDS---");
+      if (kwIdx > 0) desc = desc.slice(0, kwIdx).trim();
+      // Truncate to avoid token overflow
+      if (desc.length > 800) desc = desc.slice(0, 800) + "...";
+
+      jobContext = {
+        title: job.title || undefined,
+        company: job.company || undefined,
+        description: desc || undefined,
+        location: job.location || undefined,
+      };
+    }
+  }
+
   const vapi = getVapiClient();
 
   try {
@@ -72,7 +98,7 @@ export async function POST(req: NextRequest) {
           messages: [
             {
               role: "system",
-              content: buildScreeningPrompt(candidateName, questions),
+              content: buildScreeningPrompt(candidateName, questions, jobContext),
             },
           ],
         },

@@ -288,7 +288,15 @@ export default function SearchCandidateClient({ id }: { id: string }) {
   const [displayLimit, setDisplayLimit] = useState<5 | 10 | 20 | "all">("all");
   const [copyPopupCandidate, setCopyPopupCandidate] = useState<ResumeRow | null>(null);
   const [drawerCandidate, setDrawerCandidate] = useState<ResumeRow | null>(null);
-  const [drawerTab, setDrawerTab] = useState<"screening" | "log">("screening");
+  const [drawerTab, setDrawerTab] = useState<"screening" | "log" | "notes" | "email" | "schedule">("screening");
+  const [compareMode, setCompareMode] = useState(false);
+  const [bulkCallOpen, setBulkCallOpen] = useState(false);
+  const [copilotOpen, setCopilotOpen] = useState(false);
+  const [rubricOpen, setRubricOpen] = useState(false);
+  const [workflowRunning, setWorkflowRunning] = useState(false);
+  const [workflowResult, setWorkflowResult] = useState<any>(null);
+  const [semanticSearchOpen, setSemanticSearchOpen] = useState(false);
+  const [aiAnalyticsOpen, setAiAnalyticsOpen] = useState(false);
 
   const total = totalCount;
   const avgScore = serverAvgScore;
@@ -549,6 +557,38 @@ export default function SearchCandidateClient({ id }: { id: string }) {
               Delete Campaign
             </button>
           </div>
+
+          {/* AI Tools Row */}
+          <div className="flex flex-wrap items-center gap-2 mt-3 lg:self-end">
+            <button
+              onClick={() => setCopilotOpen(true)}
+              className="rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/20 px-3 py-2 text-xs font-semibold text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/30 transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
+              AI Copilot
+            </button>
+            <button
+              onClick={() => setSemanticSearchOpen(true)}
+              className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20 px-3 py-2 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+              Semantic Search
+            </button>
+            <button
+              onClick={() => setRubricOpen(true)}
+              className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-xs font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
+              Scoring Rubric
+            </button>
+            <button
+              onClick={() => setAiAnalyticsOpen(true)}
+              className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/20 px-3 py-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+              AI Analytics
+            </button>
+          </div>
         </div>
 
         {err && (
@@ -737,6 +777,50 @@ export default function SearchCandidateClient({ id }: { id: string }) {
                         className="text-red-600 dark:text-red-400 hover:underline cursor-pointer font-semibold"
                       >
                         Delete Selected
+                      </button>
+                      <span className="text-zinc-300 dark:text-zinc-700">|</span>
+                      <button
+                        type="button"
+                        onClick={() => setBulkCallOpen(true)}
+                        className="text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer font-semibold"
+                      >
+                        Bulk Call
+                      </button>
+                      {selectedSearchResumeIds.size >= 2 && selectedSearchResumeIds.size <= 5 && (
+                        <>
+                          <span className="text-zinc-300 dark:text-zinc-700">|</span>
+                          <button
+                            type="button"
+                            onClick={() => setCompareMode(true)}
+                            className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer font-semibold"
+                          >
+                            Compare
+                          </button>
+                        </>
+                      )}
+                      <span className="text-zinc-300 dark:text-zinc-700">|</span>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setWorkflowRunning(true);
+                          setWorkflowResult(null);
+                          try {
+                            const res = await fetch("/api/agent-workflow", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ resumeIds: [...selectedSearchResumeIds], jobId: id }),
+                            });
+                            const json = await res.json();
+                            if (res.ok) {
+                              setWorkflowResult(json.data);
+                              await refreshResumes(page);
+                            }
+                          } catch {} finally { setWorkflowRunning(false); }
+                        }}
+                        disabled={workflowRunning}
+                        className="text-purple-600 dark:text-purple-400 hover:underline cursor-pointer font-semibold disabled:opacity-50"
+                      >
+                        {workflowRunning ? "Running AI Agent..." : "AI Workflow"}
                       </button>
                     </div>
                   ) : (
@@ -1026,6 +1110,34 @@ export default function SearchCandidateClient({ id }: { id: string }) {
             onTabChange={setDrawerTab}
             onClose={() => setDrawerCandidate(null)}
           />
+        )}
+        {bulkCallOpen && (
+          <BulkCallModal
+            resumeIds={[...selectedSearchResumeIds]}
+            jobId={id}
+            onClose={() => setBulkCallOpen(false)}
+          />
+        )}
+        {compareMode && (
+          <CompareModal
+            resumeIds={[...selectedSearchResumeIds]}
+            onClose={() => setCompareMode(false)}
+          />
+        )}
+        {copilotOpen && (
+          <CopilotPanel jobId={id} onClose={() => setCopilotOpen(false)} />
+        )}
+        {semanticSearchOpen && (
+          <SemanticSearchModal jobId={id} onClose={() => setSemanticSearchOpen(false)} />
+        )}
+        {rubricOpen && (
+          <ScoringRubricModal jobId={id} onClose={() => setRubricOpen(false)} />
+        )}
+        {aiAnalyticsOpen && (
+          <AIAnalyticsModal onClose={() => setAiAnalyticsOpen(false)} />
+        )}
+        {workflowResult && (
+          <WorkflowResultModal data={workflowResult} onClose={() => setWorkflowResult(null)} />
         )}
         </>
         )}
@@ -2775,6 +2887,8 @@ const STATUS_COLOR: Record<string, string> = {
   failed: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800",
 };
 
+type DrawerTab = "screening" | "log" | "notes" | "email" | "schedule";
+
 function CandidateDrawer({
   candidate,
   jobId,
@@ -2784,8 +2898,8 @@ function CandidateDrawer({
 }: {
   candidate: ResumeRow;
   jobId: string;
-  activeTab: "screening" | "log";
-  onTabChange: (tab: "screening" | "log") => void;
+  activeTab: DrawerTab;
+  onTabChange: (tab: DrawerTab) => void;
   onClose: () => void;
 }) {
   const phone = candidate.phone || candidate.parsed_json?.phone;
@@ -2824,10 +2938,13 @@ function CandidateDrawer({
           </div>
 
           {/* Tabs */}
-          <div className="flex px-6 gap-1">
+          <div className="flex px-6 gap-1 overflow-x-auto">
             {([
-              { key: "screening" as const, label: "Screening Call", icon: "M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" },
-              { key: "log" as const, label: "Call Log", icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" },
+              { key: "screening" as const, label: "Call", icon: "M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" },
+              { key: "log" as const, label: "History", icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" },
+              { key: "notes" as const, label: "Notes", icon: "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" },
+              { key: "email" as const, label: "Email", icon: "M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" },
+              { key: "schedule" as const, label: "Schedule", icon: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" },
             ]).map((tab) => (
               <button
                 key={tab.key}
@@ -2854,6 +2971,15 @@ function CandidateDrawer({
           )}
           {activeTab === "log" && (
             <CallLogTab candidate={candidate} />
+          )}
+          {activeTab === "notes" && (
+            <NotesTab candidate={candidate} jobId={jobId} />
+          )}
+          {activeTab === "email" && (
+            <EmailTab candidate={candidate} jobId={jobId} />
+          )}
+          {activeTab === "schedule" && (
+            <ScheduleTab candidate={candidate} jobId={jobId} />
           )}
         </div>
       </div>
@@ -2884,6 +3010,7 @@ function ScreeningTab({
   const [calling, setCalling] = useState(false);
   const [callStatus, setCallStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [generatingQuestions, setGeneratingQuestions] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -3012,10 +3139,47 @@ function ScreeningTab({
         </button>
       </div>
 
+      {/* AI Smart Questions */}
+      <button
+        onClick={async () => {
+          setGeneratingQuestions(true);
+          try {
+            const res = await fetch("/api/smart-questions", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ resumeId: candidate.id, jobId }),
+            });
+            const json = await res.json();
+            if (res.ok && json.data?.questions) {
+              setQuestions((prev) => {
+                const newQs = json.data.questions.filter((q: string) => !prev.includes(q));
+                return [...prev, ...newQs];
+              });
+            }
+          } catch {} finally {
+            setGeneratingQuestions(false);
+          }
+        }}
+        disabled={calling || generatingQuestions}
+        className="w-full rounded-xl border border-dashed border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/20 px-4 py-2.5 text-sm font-semibold text-violet-600 dark:text-violet-400 hover:bg-violet-100 dark:hover:bg-violet-950/40 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+      >
+        {generatingQuestions ? (
+          <>
+            <div className="w-4 h-4 border-2 border-violet-300 border-t-violet-600 rounded-full animate-spin" />
+            Analyzing resume...
+          </>
+        ) : (
+          <>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+            AI: Suggest Smart Questions
+          </>
+        )}
+      </button>
+
       {/* Quick-add presets */}
       {DEFAULT_SCREENING_QUESTIONS.filter((q) => !questions.includes(q)).length > 0 && (
         <div>
-          <p className="text-xs font-medium text-zinc-400 dark:text-zinc-500 mb-2">Suggested questions:</p>
+          <p className="text-xs font-medium text-zinc-400 dark:text-zinc-500 mb-2">Preset questions:</p>
           <div className="flex flex-wrap gap-1.5">
             {DEFAULT_SCREENING_QUESTIONS.filter((q) => !questions.includes(q)).map((q) => (
               <button
@@ -3238,6 +3402,1691 @@ function CallLogTab({ candidate }: { candidate: ResumeRow }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function NotesTab({ candidate, jobId }: { candidate: ResumeRow; jobId: string }) {
+  const [notes, setNotes] = useState<{ id: string; content: string; created_at: string; updated_at: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newNote, setNewNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState("");
+
+  useEffect(() => { fetchNotes(); }, [candidate.id]);
+
+  const fetchNotes = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/notes?resumeId=${candidate.id}&jobId=${jobId}`);
+      const json = await res.json();
+      if (res.ok) setNotes(json.data || []);
+    } catch {} finally { setLoading(false); }
+  };
+
+  const addNote = async () => {
+    if (!newNote.trim()) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resumeId: candidate.id, jobId, content: newNote.trim() }),
+      });
+      if (res.ok) {
+        setNewNote("");
+        fetchNotes();
+      }
+    } catch {} finally { setSaving(false); }
+  };
+
+  const updateNote = async (id: string) => {
+    if (!editContent.trim()) return;
+    try {
+      await fetch(`/api/notes/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: editContent.trim() }),
+      });
+      setEditingId(null);
+      fetchNotes();
+    } catch {}
+  };
+
+  const deleteNote = async (id: string) => {
+    try {
+      await fetch(`/api/notes/${id}`, { method: "DELETE" });
+      fetchNotes();
+    } catch {}
+  };
+
+  if (loading) {
+    return <div className="flex items-center justify-center py-16"><div className="w-6 h-6 border-2 border-violet-300 border-t-violet-600 rounded-full animate-spin" /></div>;
+  }
+
+  return (
+    <div className="p-5 space-y-4">
+      {/* Add note */}
+      <div className="space-y-2">
+        <textarea
+          value={newNote}
+          onChange={(e) => setNewNote(e.target.value)}
+          placeholder="Add a note about this candidate..."
+          rows={3}
+          className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3.5 py-2.5 text-sm text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-violet-500/30 resize-none"
+        />
+        <button
+          onClick={addNote}
+          disabled={saving || !newNote.trim()}
+          className="rounded-xl bg-violet-500 text-white px-4 py-2 text-sm font-semibold hover:bg-violet-600 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {saving ? "Saving..." : "Add Note"}
+        </button>
+      </div>
+
+      {/* Notes list */}
+      {notes.length === 0 ? (
+        <div className="text-center py-8">
+          <p className="text-sm text-zinc-400 dark:text-zinc-500">No notes yet</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {notes.map((note) => (
+            <div key={note.id} className="bg-zinc-50 dark:bg-zinc-800/50 rounded-xl p-4 border border-zinc-200 dark:border-zinc-700 group">
+              {editingId === note.id ? (
+                <div className="space-y-2">
+                  <textarea
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    rows={3}
+                    className="w-full rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/30 resize-none"
+                  />
+                  <div className="flex gap-2">
+                    <button onClick={() => updateNote(note.id)} className="text-xs font-semibold text-violet-600 hover:text-violet-700 cursor-pointer">Save</button>
+                    <button onClick={() => setEditingId(null)} className="text-xs font-semibold text-zinc-400 hover:text-zinc-600 cursor-pointer">Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p className="text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap">{note.content}</p>
+                  <div className="flex items-center justify-between mt-2">
+                    <span className="text-xs text-zinc-400">
+                      {new Date(note.created_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                    </span>
+                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition">
+                      <button onClick={() => { setEditingId(note.id); setEditContent(note.content); }} className="text-xs text-zinc-400 hover:text-violet-600 cursor-pointer">Edit</button>
+                      <button onClick={() => deleteNote(note.id)} className="text-xs text-zinc-400 hover:text-red-500 cursor-pointer">Delete</button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmailTab({ candidate, jobId }: { candidate: ResumeRow; jobId: string }) {
+  const [templates, setTemplates] = useState<{ id: string; name: string; subject: string; body: string; category: string }[]>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [emailLogs, setEmailLogs] = useState<{ id: string; subject: string; created_at: string; status: string }[]>([]);
+
+  // Template manager state
+  const [showTemplateManager, setShowTemplateManager] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<string | null>(null);
+  const [tplName, setTplName] = useState("");
+  const [tplSubject, setTplSubject] = useState("");
+  const [tplBody, setTplBody] = useState("");
+  const [tplCategory, setTplCategory] = useState("general");
+  const [tplSaving, setTplSaving] = useState(false);
+  const [tplError, setTplError] = useState<string | null>(null);
+
+  const candidateEmail = candidate.email || candidate.parsed_json?.email;
+
+  useEffect(() => {
+    fetchTemplates();
+    fetchEmailLogs();
+  }, [candidate.id]);
+
+  const fetchTemplates = async () => {
+    try {
+      const res = await fetch("/api/email-templates");
+      const json = await res.json();
+      if (res.ok) setTemplates(json.templates || []);
+    } catch {}
+  };
+
+  const resetTplForm = () => {
+    setEditingTemplate(null);
+    setTplName("");
+    setTplSubject("");
+    setTplBody("");
+    setTplCategory("general");
+    setTplError(null);
+  };
+
+  const startEditTemplate = (t: typeof templates[0]) => {
+    setEditingTemplate(t.id);
+    setTplName(t.name);
+    setTplSubject(t.subject);
+    setTplBody(t.body);
+    setTplCategory(t.category || "general");
+    setTplError(null);
+  };
+
+  const saveTemplate = async () => {
+    if (!tplName.trim() || !tplSubject.trim() || !tplBody.trim()) {
+      setTplError("Name, subject, and body are required");
+      return;
+    }
+    setTplSaving(true);
+    setTplError(null);
+    try {
+      const payload = { name: tplName.trim(), subject: tplSubject.trim(), body: tplBody.trim(), category: tplCategory };
+      const res = editingTemplate
+        ? await fetch(`/api/email-templates/${editingTemplate}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+        : await fetch("/api/email-templates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to save template");
+      resetTplForm();
+      fetchTemplates();
+    } catch (err: any) {
+      setTplError(err.message);
+    } finally {
+      setTplSaving(false);
+    }
+  };
+
+  const deleteTemplate = async (id: string) => {
+    try {
+      const res = await fetch(`/api/email-templates/${id}`, { method: "DELETE" });
+      if (!res.ok) { const json = await res.json(); throw new Error(json.error); }
+      if (selectedTemplate === id) setSelectedTemplate(null);
+      fetchTemplates();
+    } catch {}
+  };
+
+  const fetchEmailLogs = async () => {
+    try {
+      const res = await fetch(`/api/email/send?resumeId=${candidate.id}`);
+      // This endpoint doesn't exist for GET yet, so we'll use email_logs
+    } catch {}
+  };
+
+  const applyTemplate = (templateId: string) => {
+    const t = templates.find((t) => t.id === templateId);
+    if (!t) return;
+    setSelectedTemplate(templateId);
+    // Replace merge fields
+    let s = t.subject;
+    let b = t.body;
+    const replacements: Record<string, string> = {
+      "{{name}}": candidate.full_name || "Candidate",
+      "{{email}}": candidateEmail || "",
+      "{{phone}}": candidate.phone || candidate.parsed_json?.phone || "",
+    };
+    Object.entries(replacements).forEach(([key, val]) => {
+      s = s.replaceAll(key, val);
+      b = b.replaceAll(key, val);
+    });
+    setSubject(s);
+    setBody(b);
+  };
+
+  const sendEmail = async () => {
+    if (!candidateEmail || !subject.trim() || !body.trim()) return;
+    setSending(true);
+    setError(null);
+    setSent(false);
+    try {
+      const res = await fetch("/api/email/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          resumeId: candidate.id,
+          jobId,
+          templateId: selectedTemplate,
+          subject: subject.trim(),
+          body: body.trim(),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to send");
+      setSent(true);
+      setSubject("");
+      setBody("");
+      setSelectedTemplate(null);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="p-5 space-y-4">
+      {!candidateEmail && (
+        <div className="text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 rounded-xl p-3 border border-amber-200 dark:border-amber-800">
+          No email address available for this candidate
+        </div>
+      )}
+
+      {/* Template selector + manage button */}
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">Use Template</label>
+          <button
+            onClick={() => { setShowTemplateManager(!showTemplateManager); if (showTemplateManager) resetTplForm(); }}
+            className="text-xs font-medium text-violet-500 hover:text-violet-600 transition cursor-pointer inline-flex items-center gap-1"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={showTemplateManager ? "M6 18L18 6M6 6l12 12" : "M12 4v16m8-8H4"} /></svg>
+            {showTemplateManager ? "Close" : "Manage Templates"}
+          </button>
+        </div>
+        {templates.length > 0 ? (
+          <select
+            value={selectedTemplate || ""}
+            onChange={(e) => e.target.value ? applyTemplate(e.target.value) : setSelectedTemplate(null)}
+            className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2.5 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/30 cursor-pointer"
+          >
+            <option value="">Select a template...</option>
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+        ) : (
+          <p className="text-xs text-zinc-400 dark:text-zinc-500">No templates yet. Click &quot;Manage Templates&quot; to create one.</p>
+        )}
+      </div>
+
+      {/* Template manager panel */}
+      {showTemplateManager && (
+        <div className="rounded-xl border border-violet-200 dark:border-violet-800/50 bg-violet-50/50 dark:bg-violet-950/20 p-4 space-y-3">
+          <h4 className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{editingTemplate ? "Edit Template" : "New Template"}</h4>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1 block">Name</label>
+              <input type="text" value={tplName} onChange={(e) => setTplName(e.target.value)} placeholder="e.g. Interview Invite" className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-violet-500/30" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1 block">Category</label>
+              <select value={tplCategory} onChange={(e) => setTplCategory(e.target.value)} className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/30 cursor-pointer">
+                <option value="general">General</option>
+                <option value="interview">Interview</option>
+                <option value="rejection">Rejection</option>
+                <option value="follow-up">Follow Up</option>
+                <option value="offer">Offer</option>
+                <option value="onboarding">Onboarding</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1 block">Subject</label>
+            <input type="text" value={tplSubject} onChange={(e) => setTplSubject(e.target.value)} placeholder="Email subject line..." className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-violet-500/30" />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1 block">Body</label>
+            <textarea value={tplBody} onChange={(e) => setTplBody(e.target.value)} placeholder="Write template body... Use {{name}}, {{email}}, {{phone}}, {{role}}, {{company}} as merge fields" rows={5} className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-violet-500/30 resize-none" />
+          </div>
+
+          {tplError && <p className="text-xs text-red-500">{tplError}</p>}
+
+          <div className="flex gap-2">
+            <button onClick={saveTemplate} disabled={tplSaving} className="rounded-lg bg-violet-500 text-white px-4 py-2 text-xs font-bold hover:bg-violet-600 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1.5">
+              {tplSaving ? <><div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Saving...</> : editingTemplate ? "Update Template" : "Create Template"}
+            </button>
+            {editingTemplate && (
+              <button onClick={resetTplForm} className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-4 py-2 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-700 transition cursor-pointer">Cancel</button>
+            )}
+          </div>
+
+          {/* Existing templates list */}
+          {templates.length > 0 && (
+            <div className="border-t border-violet-200 dark:border-violet-800/50 pt-3 mt-3 space-y-2">
+              <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">Your Templates ({templates.length})</p>
+              {templates.map((t) => (
+                <div key={t.id} className="flex items-center justify-between rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 group">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200 truncate">{t.name}</p>
+                    <p className="text-xs text-zinc-400 dark:text-zinc-500 truncate">{t.subject}</p>
+                  </div>
+                  <div className="flex gap-1 ml-2 shrink-0 opacity-0 group-hover:opacity-100 transition">
+                    <button onClick={() => startEditTemplate(t)} className="p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 hover:text-violet-500 transition cursor-pointer" title="Edit">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                    </button>
+                    <button onClick={() => deleteTemplate(t.id)} className="p-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-950/30 text-zinc-400 hover:text-red-500 transition cursor-pointer" title="Delete">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Compose */}
+      <div>
+        <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1.5 block">To</label>
+        <input
+          type="text"
+          value={candidateEmail || "No email"}
+          disabled
+          className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/50 px-3.5 py-2.5 text-sm text-zinc-500 dark:text-zinc-400"
+        />
+      </div>
+      <div>
+        <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1.5 block">Subject</label>
+        <input
+          type="text"
+          value={subject}
+          onChange={(e) => setSubject(e.target.value)}
+          placeholder="Email subject..."
+          className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3.5 py-2.5 text-sm text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+        />
+      </div>
+      <div>
+        <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1.5 block">Body</label>
+        <textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="Write your email..."
+          rows={6}
+          className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3.5 py-2.5 text-sm text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-violet-500/30 resize-none"
+        />
+        <p className="text-xs text-zinc-400 mt-1">Merge fields: {"{{name}}"}, {"{{email}}"}, {"{{phone}}"}, {"{{role}}"}, {"{{company}}"}</p>
+      </div>
+
+      {error && (
+        <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 rounded-xl p-3 border border-red-200 dark:border-red-800">{error}</div>
+      )}
+      {sent && (
+        <div className="text-sm text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 rounded-xl p-3 border border-emerald-200 dark:border-emerald-800">Email sent successfully!</div>
+      )}
+
+      <button
+        onClick={sendEmail}
+        disabled={sending || !candidateEmail || !subject.trim() || !body.trim()}
+        className="w-full rounded-xl bg-violet-500 text-white py-3 text-sm font-bold hover:bg-violet-600 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+      >
+        {sending ? (
+          <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Sending...</>
+        ) : (
+          <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg> Send Email</>
+        )}
+      </button>
+
+      {/* Quick templates if none saved and manager is closed */}
+      {templates.length === 0 && !showTemplateManager && (
+        <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
+          <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-2">Quick templates:</p>
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              { label: "Interview Invite", subj: "Interview Invitation - Next Steps", bod: "Hi {{name}},\n\nThank you for your application. We'd like to invite you for an interview to discuss the role further.\n\nPlease let us know your availability for the coming week.\n\nBest regards" },
+              { label: "Rejection", subj: "Application Update", bod: "Hi {{name}},\n\nThank you for your interest and the time you invested in the application process.\n\nAfter careful consideration, we've decided to move forward with other candidates whose experience more closely aligns with our current needs.\n\nWe wish you the best in your job search.\n\nBest regards" },
+              { label: "Follow Up", subj: "Following Up on Your Application", bod: "Hi {{name}},\n\nWe wanted to follow up regarding your application. Our team is currently reviewing candidates and we'll be in touch soon with next steps.\n\nThank you for your patience.\n\nBest regards" },
+            ].map((t) => (
+              <button
+                key={t.label}
+                onClick={() => {
+                  const name = candidate.full_name || "Candidate";
+                  setSubject(t.subj);
+                  setBody(t.bod.replaceAll("{{name}}", name));
+                }}
+                className="text-xs rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800/50 px-2.5 py-1.5 text-zinc-500 dark:text-zinc-400 hover:border-violet-400 hover:text-violet-600 transition cursor-pointer"
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BulkCallModal({
+  resumeIds,
+  jobId,
+  onClose,
+}: {
+  resumeIds: string[];
+  jobId: string;
+  onClose: () => void;
+}) {
+  const [questions, setQuestions] = useState<string[]>(DEFAULT_SCREENING_QUESTIONS.slice(0, 3));
+  const [newQuestion, setNewQuestion] = useState("");
+  const [calling, setCalling] = useState(false);
+  const [results, setResults] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const startBulkCall = async () => {
+    if (!questions.length) return;
+    setCalling(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/voice-call/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resumeIds, jobId, questions }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed");
+      setResults(json.data);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setCalling(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-5 border-b border-zinc-100 dark:border-zinc-800">
+          <div>
+            <h3 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">Bulk Screening Calls</h3>
+            <p className="text-sm text-zinc-500 mt-0.5">{resumeIds.length} candidates selected</p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition cursor-pointer">
+            <svg className="w-5 h-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {results ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-emerald-50 dark:bg-emerald-950/30 rounded-xl p-3 text-center border border-emerald-200 dark:border-emerald-800">
+                  <div className="text-2xl font-bold text-emerald-600">{results.queued}</div>
+                  <div className="text-xs text-emerald-600 font-medium">Queued</div>
+                </div>
+                <div className="bg-amber-50 dark:bg-amber-950/30 rounded-xl p-3 text-center border border-amber-200 dark:border-amber-800">
+                  <div className="text-2xl font-bold text-amber-600">{results.skipped}</div>
+                  <div className="text-xs text-amber-600 font-medium">Skipped</div>
+                </div>
+                <div className="bg-red-50 dark:bg-red-950/30 rounded-xl p-3 text-center border border-red-200 dark:border-red-800">
+                  <div className="text-2xl font-bold text-red-600">{results.failed}</div>
+                  <div className="text-xs text-red-600 font-medium">Failed</div>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                {results.results.map((r: any) => (
+                  <div key={r.resumeId} className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg bg-zinc-50 dark:bg-zinc-800/50">
+                    <div className={`w-2 h-2 rounded-full ${r.status === "queued" ? "bg-emerald-500" : r.status === "skipped" ? "bg-amber-500" : "bg-red-500"}`} />
+                    <span className="text-zinc-700 dark:text-zinc-300 flex-1">{r.name}</span>
+                    <span className="text-xs text-zinc-400">{r.error || r.status}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <>
+              <div>
+                <h4 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 mb-2">Questions for all candidates</h4>
+                <div className="space-y-2">
+                  {questions.map((q, i) => (
+                    <div key={i} className="flex items-start gap-2 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg p-2.5 border border-zinc-200 dark:border-zinc-700">
+                      <span className="text-xs font-bold text-violet-600 dark:text-violet-400 mt-0.5 shrink-0">{i + 1}.</span>
+                      <span className="text-sm text-zinc-700 dark:text-zinc-300 flex-1">{q}</span>
+                      <button onClick={() => setQuestions((p) => p.filter((_, j) => j !== i))} className="text-zinc-400 hover:text-red-500 cursor-pointer">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <input type="text" value={newQuestion} onChange={(e) => setNewQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && newQuestion.trim()) { setQuestions((p) => [...p, newQuestion.trim()]); setNewQuestion(""); } }} placeholder="Add question..." className="flex-1 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30" />
+                <button onClick={() => { if (newQuestion.trim()) { setQuestions((p) => [...p, newQuestion.trim()]); setNewQuestion(""); } }} className="rounded-lg bg-violet-500 text-white px-3 py-2 text-sm font-semibold hover:bg-violet-600 cursor-pointer">Add</button>
+              </div>
+            </>
+          )}
+          {error && <div className="text-sm text-red-600 bg-red-50 dark:bg-red-950/30 rounded-lg p-3 border border-red-200 dark:border-red-800">{error}</div>}
+        </div>
+
+        <div className="p-5 border-t border-zinc-100 dark:border-zinc-800 flex gap-2 justify-end">
+          <button onClick={onClose} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/40 px-4 py-2 text-sm font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 cursor-pointer">
+            {results ? "Close" : "Cancel"}
+          </button>
+          {!results && (
+            <button onClick={startBulkCall} disabled={calling || questions.length === 0} className="rounded-xl bg-emerald-500 text-white px-4 py-2 text-sm font-bold hover:bg-emerald-600 cursor-pointer disabled:opacity-40 inline-flex items-center gap-2">
+              {calling ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Calling...</> : <>Start {resumeIds.length} Calls</>}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type InterviewSchedule = {
+  id: string;
+  token: string;
+  candidate_name: string | null;
+  candidate_email: string;
+  available_slots: string[];
+  selected_slot: string | null;
+  status: string;
+  interview_type: string;
+  duration_minutes: number;
+  location: string | null;
+  notes: string | null;
+  created_at: string;
+};
+
+function ScheduleTab({ candidate, jobId }: { candidate: ResumeRow; jobId: string }) {
+  const [schedules, setSchedules] = useState<InterviewSchedule[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  // Slot picker state
+  const [showSlotPicker, setShowSlotPicker] = useState(false);
+  const [slotDate, setSlotDate] = useState("");
+  const [slotTime, setSlotTime] = useState("10:00");
+  const [customSlots, setCustomSlots] = useState<string[]>([]);
+  const [interviewType, setInterviewType] = useState("video");
+  const [duration, setDuration] = useState(30);
+  const [location, setLocation] = useState("");
+  const [notes, setNotes] = useState("");
+
+  useEffect(() => {
+    fetchSchedules();
+  }, [candidate.id]);
+
+  const fetchSchedules = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/schedule?resumeId=${candidate.id}`);
+      const json = await res.json();
+      if (res.ok) setSchedules(json.data || []);
+    } catch {} finally {
+      setLoading(false);
+    }
+  };
+
+  const addSlot = () => {
+    if (!slotDate || !slotTime) return;
+    const iso = new Date(`${slotDate}T${slotTime}:00`).toISOString();
+    if (!customSlots.includes(iso)) {
+      setCustomSlots((prev) => [...prev, iso].sort());
+    }
+    setSlotTime("10:00");
+  };
+
+  const removeSlot = (iso: string) => {
+    setCustomSlots((prev) => prev.filter((s) => s !== iso));
+  };
+
+  const addQuickSlots = () => {
+    // Add default: next 5 business days at 10am and 2pm
+    const slots: string[] = [];
+    const now = new Date();
+    let day = new Date(now);
+    day.setDate(day.getDate() + 1);
+    let added = 0;
+    while (added < 5) {
+      const dow = day.getDay();
+      if (dow !== 0 && dow !== 6) {
+        const morning = new Date(day);
+        morning.setHours(10, 0, 0, 0);
+        slots.push(morning.toISOString());
+        const afternoon = new Date(day);
+        afternoon.setHours(14, 0, 0, 0);
+        slots.push(afternoon.toISOString());
+        added++;
+      }
+      day.setDate(day.getDate() + 1);
+    }
+    setCustomSlots((prev) => {
+      const combined = new Set([...prev, ...slots]);
+      return Array.from(combined).sort();
+    });
+  };
+
+  const sendInvite = async () => {
+    if (customSlots.length === 0) {
+      setError("Add at least one time slot");
+      return;
+    }
+    setSending(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await fetch("/api/schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          resumeId: candidate.id,
+          jobId,
+          availableSlots: customSlots,
+          interviewType,
+          durationMinutes: duration,
+          location: location.trim() || undefined,
+          notes: notes.trim() || undefined,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to send invite");
+      setSuccess("Scheduling invite sent!");
+      setShowSlotPicker(false);
+      setCustomSlots([]);
+      setLocation("");
+      setNotes("");
+      fetchSchedules();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const cancelSchedule = async (id: string) => {
+    try {
+      // We don't have a delete endpoint, but we can update via the main schedule endpoint
+      // For now, just refetch — cancellation can be done from Supabase
+      setError("Contact support to cancel this interview");
+    } catch {}
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <div className="w-6 h-6 border-2 border-violet-300 border-t-violet-600 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  const candidateEmail = candidate.email || candidate.parsed_json?.email;
+
+  return (
+    <div className="p-5 space-y-5">
+      {/* Active schedules */}
+      {schedules.length > 0 && (
+        <div className="space-y-3">
+          <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider">Interview Schedules</h4>
+          {schedules.map((s) => {
+            const isBooked = s.status === "booked";
+            const isCancelled = s.status === "cancelled";
+            return (
+              <div
+                key={s.id}
+                className={`rounded-xl border p-4 ${
+                  isBooked
+                    ? "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800"
+                    : isCancelled
+                    ? "bg-zinc-50 dark:bg-zinc-800/50 border-zinc-200 dark:border-zinc-700 opacity-60"
+                    : "bg-violet-50 dark:bg-violet-950/20 border-violet-200 dark:border-violet-800"
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <span
+                    className={`text-xs font-bold px-2 py-0.5 rounded-md ${
+                      isBooked
+                        ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400"
+                        : isCancelled
+                        ? "bg-zinc-200 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-400"
+                        : "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-400"
+                    }`}
+                  >
+                    {isBooked ? "Booked" : isCancelled ? "Cancelled" : "Pending"}
+                  </span>
+                  <span className="text-xs text-zinc-400">
+                    {s.interview_type} · {s.duration_minutes}min
+                  </span>
+                </div>
+
+                {isBooked && s.selected_slot && (
+                  <div className="mb-2">
+                    <div className="text-sm font-bold text-emerald-800 dark:text-emerald-300">
+                      {new Date(s.selected_slot).toLocaleDateString("en-US", {
+                        weekday: "long",
+                        month: "long",
+                        day: "numeric",
+                      })}
+                    </div>
+                    <div className="text-lg font-bold text-emerald-700 dark:text-emerald-400">
+                      {new Date(s.selected_slot).toLocaleTimeString("en-US", {
+                        hour: "numeric",
+                        minute: "2-digit",
+                        hour12: true,
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {!isBooked && !isCancelled && (
+                  <div className="mb-2">
+                    <div className="text-xs text-violet-600 dark:text-violet-400 mb-1">
+                      {s.available_slots.length} time slots offered · Waiting for candidate
+                    </div>
+                  </div>
+                )}
+
+                {s.location && (
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-1 mb-1">
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                    </svg>
+                    {s.location}
+                  </div>
+                )}
+
+                <div className="text-xs text-zinc-400 mt-2">
+                  Sent {new Date(s.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* No candidate email warning */}
+      {!candidateEmail && (
+        <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl">
+          <svg className="w-4 h-4 text-amber-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+          </svg>
+          <p className="text-xs text-amber-700 dark:text-amber-400">No email address for this candidate. A scheduling invite cannot be sent.</p>
+        </div>
+      )}
+
+      {/* Send new invite */}
+      {!showSlotPicker && candidateEmail && (
+        <button
+          onClick={() => {
+            setShowSlotPicker(true);
+            if (customSlots.length === 0) addQuickSlots();
+          }}
+          className="w-full rounded-xl border border-dashed border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/20 px-4 py-3 text-sm font-semibold text-violet-600 dark:text-violet-400 hover:bg-violet-100 dark:hover:bg-violet-950/40 transition cursor-pointer inline-flex items-center justify-center gap-2"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+          </svg>
+          Send Interview Scheduling Invite
+        </button>
+      )}
+
+      {/* Slot picker form */}
+      {showSlotPicker && (
+        <div className="space-y-4 border border-violet-200 dark:border-violet-800 rounded-xl p-4 bg-white dark:bg-zinc-900/50">
+          <h4 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Configure Interview</h4>
+
+          {/* Interview type + duration */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1 block">Format</label>
+              <select
+                value={interviewType}
+                onChange={(e) => setInterviewType(e.target.value)}
+                className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+              >
+                <option value="video">Video</option>
+                <option value="phone">Phone</option>
+                <option value="in-person">In-Person</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1 block">Duration</label>
+              <select
+                value={duration}
+                onChange={(e) => setDuration(Number(e.target.value))}
+                className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+              >
+                <option value={15}>15 min</option>
+                <option value={30}>30 min</option>
+                <option value={45}>45 min</option>
+                <option value={60}>60 min</option>
+                <option value={90}>90 min</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Location */}
+          <div>
+            <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1 block">Location / Link (optional)</label>
+            <input
+              type="text"
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+              placeholder="e.g., Zoom link, office address, phone number..."
+              className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2.5 text-sm text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+            />
+          </div>
+
+          {/* Prep notes */}
+          <div>
+            <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1 block">Prep Notes for Candidate (optional)</label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="e.g., Please have your portfolio ready, bring ID, etc."
+              rows={2}
+              className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2.5 text-sm text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-violet-500/30 resize-none"
+            />
+          </div>
+
+          {/* Time slots */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Time Slots</label>
+              <button
+                onClick={addQuickSlots}
+                className="text-xs text-violet-600 dark:text-violet-400 hover:text-violet-700 font-semibold cursor-pointer"
+              >
+                + Auto-fill 5 days
+              </button>
+            </div>
+
+            {/* Existing slots */}
+            {customSlots.length > 0 && (
+              <div className="space-y-1.5 mb-3 max-h-48 overflow-y-auto">
+                {customSlots.map((slot) => {
+                  const d = new Date(slot);
+                  return (
+                    <div
+                      key={slot}
+                      className="flex items-center justify-between bg-zinc-50 dark:bg-zinc-800/50 rounded-lg px-3 py-2 border border-zinc-200 dark:border-zinc-700 group"
+                    >
+                      <span className="text-sm text-zinc-700 dark:text-zinc-300">
+                        {d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} at{" "}
+                        {d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })}
+                      </span>
+                      <button
+                        onClick={() => removeSlot(slot)}
+                        className="text-zinc-300 dark:text-zinc-600 group-hover:text-red-500 transition cursor-pointer"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Add slot */}
+            <div className="flex gap-2">
+              <input
+                type="date"
+                value={slotDate}
+                onChange={(e) => setSlotDate(e.target.value)}
+                min={new Date(Date.now() + 86400000).toISOString().split("T")[0]}
+                className="flex-1 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+              />
+              <input
+                type="time"
+                value={slotTime}
+                onChange={(e) => setSlotTime(e.target.value)}
+                className="w-28 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+              />
+              <button
+                onClick={addSlot}
+                disabled={!slotDate}
+                className="rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 px-3 py-2 text-sm font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 cursor-pointer disabled:opacity-40"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+
+          {error && (
+            <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 rounded-lg p-3 border border-red-200 dark:border-red-800">
+              {error}
+            </div>
+          )}
+          {success && (
+            <div className="text-sm text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 rounded-lg p-3 border border-emerald-200 dark:border-emerald-800">
+              {success}
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                setShowSlotPicker(false);
+                setError(null);
+                setSuccess(null);
+              }}
+              className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-4 py-2.5 text-sm font-semibold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={sendInvite}
+              disabled={sending || customSlots.length === 0}
+              className="flex-1 rounded-xl bg-violet-600 text-white py-2.5 text-sm font-bold hover:bg-violet-700 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+            >
+              {sending ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Sending...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                  Send Invite ({customSlots.length} slots)
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Empty state */}
+      {schedules.length === 0 && !showSlotPicker && candidateEmail && (
+        <div className="text-center py-6">
+          <div className="w-12 h-12 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center mx-auto mb-3">
+            <svg className="w-6 h-6 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">No interviews scheduled</p>
+          <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">
+            Scheduling invites are sent automatically after screening calls, or you can send one manually above.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CompareModal({
+  resumeIds,
+  onClose,
+}: {
+  resumeIds: string[];
+  onClose: () => void;
+}) {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/compare", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ resumeIds }),
+        });
+        const json = await res.json();
+        if (res.ok) setData(json.data);
+      } catch {} finally { setLoading(false); }
+    })();
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl w-full max-w-5xl mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-5 border-b border-zinc-100 dark:border-zinc-800">
+          <h3 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">Compare Candidates</h3>
+          <button onClick={onClose} className="rounded-lg p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition cursor-pointer">
+            <svg className="w-5 h-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-16"><div className="w-6 h-6 border-2 border-violet-300 border-t-violet-600 rounded-full animate-spin" /></div>
+        ) : !data ? (
+          <div className="p-8 text-center text-zinc-400">Failed to load comparison data</div>
+        ) : (
+          <div className="p-5 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-zinc-200 dark:border-zinc-700">
+                  <th className="text-left py-3 px-3 text-xs font-bold text-zinc-500 uppercase tracking-wide w-32">Attribute</th>
+                  {data.candidates.map((c: any) => (
+                    <th key={c.id} className="text-left py-3 px-3 text-sm font-bold text-zinc-800 dark:text-zinc-200">{c.name}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                {[
+                  { label: "Score", render: (c: any) => <span className={`font-bold ${c.score >= 70 ? "text-emerald-600" : c.score >= 40 ? "text-amber-600" : "text-red-600"}`}>{c.score ?? "N/A"}%</span> },
+                  { label: "Experience", render: (c: any) => `${c.yearsExperience} years` },
+                  { label: "Location", render: (c: any) => c.location || "N/A" },
+                  { label: "Visa Status", render: (c: any) => c.visaStatus || "N/A" },
+                  { label: "Work Auth", render: (c: any) => c.workAuthorization || "N/A" },
+                  { label: "Email", render: (c: any) => c.email || "N/A" },
+                  { label: "Phone", render: (c: any) => c.phone || "N/A" },
+                  { label: "Skills", render: (c: any) => (
+                    <div className="flex flex-wrap gap-1">
+                      {(c.skills || []).slice(0, 8).map((s: string) => (
+                        <span key={s} className={`text-xs px-1.5 py-0.5 rounded ${data.commonSkills.includes(s.toLowerCase()) ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : (data.uniqueSkills[c.id] || []).includes(s) ? "bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400" : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400"}`}>{s}</span>
+                      ))}
+                      {(c.skills || []).length > 8 && <span className="text-xs text-zinc-400">+{c.skills.length - 8}</span>}
+                    </div>
+                  )},
+                  { label: "Education", render: (c: any) => (c.education || []).map((e: any) => `${e.degree || ""} - ${e.school || ""}`).join(", ") || "N/A" },
+                  { label: "Certifications", render: (c: any) => c.certifications || 0 },
+                  { label: "Projects", render: (c: any) => c.projects || 0 },
+                  { label: "Calls Made", render: (c: any) => c.callCount || 0 },
+                  { label: "Strengths", render: (c: any) => (
+                    <ul className="list-disc list-inside text-xs text-emerald-600 dark:text-emerald-400">
+                      {(c.strengths || []).slice(0, 4).map((s: string, i: number) => <li key={i}>{s}</li>)}
+                    </ul>
+                  )},
+                  { label: "Weaknesses", render: (c: any) => (
+                    <ul className="list-disc list-inside text-xs text-red-500 dark:text-red-400">
+                      {(c.weaknesses || []).slice(0, 4).map((s: string, i: number) => <li key={i}>{s}</li>)}
+                    </ul>
+                  )},
+                ].map((row) => (
+                  <tr key={row.label}>
+                    <td className="py-2.5 px-3 text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">{row.label}</td>
+                    {data.candidates.map((c: any) => (
+                      <td key={c.id} className="py-2.5 px-3 text-zinc-700 dark:text-zinc-300">{row.render(c)}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* Skill legend */}
+            <div className="mt-4 flex items-center gap-4 text-xs text-zinc-400">
+              <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-100 dark:bg-emerald-900/30" /> Common skill</span>
+              <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-violet-100 dark:bg-violet-900/30" /> Unique skill</span>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// AI COPILOT CHAT PANEL
+// ============================================
+function CopilotPanel({ jobId, onClose }: { jobId: string; onClose: () => void }) {
+  const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const sendMessage = async () => {
+    if (!input.trim() || loading) return;
+    const userMsg = input.trim();
+    setInput("");
+    setMessages((prev) => [...prev, { role: "user", content: userMsg }]);
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/copilot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: userMsg, jobId }),
+      });
+      const json = await res.json();
+      const reply = res.ok ? json.response : json.error || "Something went wrong";
+      setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+    } catch {
+      setMessages((prev) => [...prev, { role: "assistant", content: "Failed to get response" }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages]);
+
+  return (
+    <>
+      <div className="fixed inset-0 z-[90] bg-black/30 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="fixed inset-y-0 right-0 z-[100] w-full max-w-lg flex flex-col bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl animate-[slideIn_0.2s_ease-out]">
+        <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-zinc-200 dark:border-zinc-800">
+          <div>
+            <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+              <span className="text-violet-600">AI</span> Recruiting Copilot
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300">Claude</span>
+            </h3>
+            <p className="text-xs text-zinc-500 mt-0.5">Ask anything about your candidates</p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition cursor-pointer">
+            <svg className="w-5 h-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-5 space-y-4">
+          {messages.length === 0 && (
+            <div className="text-center py-12">
+              <div className="text-4xl mb-3">🤖</div>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-4">Ask me about your candidates</p>
+              <div className="flex flex-wrap gap-2 justify-center">
+                {["Who are the top 3 candidates?", "Which candidates have Python experience?", "Summarize the skill gaps", "Who should we interview first?"].map((q) => (
+                  <button key={q} onClick={() => { setInput(q); }} className="text-xs px-3 py-1.5 rounded-full border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-violet-50 dark:hover:bg-violet-900/20 hover:text-violet-700 dark:hover:text-violet-300 hover:border-violet-200 dark:hover:border-violet-800 transition cursor-pointer">{q}</button>
+                ))}
+              </div>
+            </div>
+          )}
+          {messages.map((m, i) => (
+            <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap ${
+                m.role === "user"
+                  ? "bg-violet-600 text-white"
+                  : "bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200"
+              }`}>
+                {m.content}
+              </div>
+            </div>
+          ))}
+          {loading && (
+            <div className="flex justify-start">
+              <div className="bg-zinc-100 dark:bg-zinc-800 rounded-2xl px-4 py-3">
+                <div className="flex gap-1">
+                  <span className="w-2 h-2 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-2 h-2 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-2 h-2 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="shrink-0 border-t border-zinc-200 dark:border-zinc-800 p-4">
+          <div className="flex gap-2">
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
+              placeholder="Ask about your candidates..."
+              className="flex-1 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-4 py-2.5 text-sm text-zinc-800 dark:text-zinc-200 placeholder-zinc-400 outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500"
+            />
+            <button
+              onClick={sendMessage}
+              disabled={!input.trim() || loading}
+              className="rounded-xl bg-violet-600 hover:bg-violet-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition cursor-pointer"
+            >
+              Send
+            </button>
+          </div>
+        </div>
+      </div>
+      <style>{`@keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }`}</style>
+    </>
+  );
+}
+
+// ============================================
+// SEMANTIC SEARCH MODAL
+// ============================================
+function SemanticSearchModal({ jobId, onClose }: { jobId: string; onClose: () => void }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [embedding, setEmbedding] = useState(false);
+  const [embedResult, setEmbedResult] = useState<any>(null);
+  const [searched, setSearched] = useState(false);
+
+  const search = async () => {
+    if (!query.trim()) return;
+    setLoading(true);
+    setSearched(true);
+    try {
+      const res = await fetch("/api/semantic-search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, jobId }),
+      });
+      const json = await res.json();
+      setResults(res.ok ? json.data?.results || [] : []);
+    } catch {
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const embedAll = async () => {
+    setEmbedding(true);
+    setEmbedResult(null);
+    try {
+      const res = await fetch("/api/embeddings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId }),
+      });
+      const json = await res.json();
+      setEmbedResult(res.ok ? json.data : { error: json.error });
+    } catch {
+      setEmbedResult({ error: "Failed to generate embeddings" });
+    } finally {
+      setEmbedding(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-5 border-b border-zinc-100 dark:border-zinc-800">
+          <div>
+            <h3 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+              Semantic Search
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">RAG</span>
+            </h3>
+            <p className="text-xs text-zinc-500 mt-0.5">Find candidates using natural language powered by vector embeddings</p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition cursor-pointer">
+            <svg className="w-5 h-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4 overflow-y-auto flex-1">
+          {/* Embed button */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={embedAll}
+              disabled={embedding}
+              className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20 px-4 py-2 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 transition cursor-pointer disabled:opacity-50"
+            >
+              {embedding ? "Generating Embeddings..." : "Generate Embeddings for All Candidates"}
+            </button>
+            {embedResult && (
+              <span className="text-xs text-zinc-500">
+                {embedResult.error || `${embedResult.embedded}/${embedResult.total} embedded`}
+              </span>
+            )}
+          </div>
+
+          {/* Search input */}
+          <div className="flex gap-2">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && search()}
+              placeholder="e.g. &quot;Senior React developer with AWS experience in fintech&quot;"
+              className="flex-1 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-4 py-2.5 text-sm text-zinc-800 dark:text-zinc-200 placeholder-zinc-400 outline-none focus:ring-2 focus:ring-blue-500/30"
+            />
+            <button
+              onClick={search}
+              disabled={!query.trim() || loading}
+              className="rounded-xl bg-blue-600 hover:bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition cursor-pointer"
+            >
+              {loading ? "Searching..." : "Search"}
+            </button>
+          </div>
+
+          {/* Results */}
+          {searched && !loading && results.length === 0 && (
+            <p className="text-sm text-zinc-400 text-center py-8">No matching candidates found. Try generating embeddings first.</p>
+          )}
+          {results.length > 0 && (
+            <div className="space-y-3">
+              <p className="text-xs text-zinc-500">{results.length} results found</p>
+              {results.map((r: any) => (
+                <div key={r.resumeId} className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">{r.name}</span>
+                      {r.email && <span className="text-xs text-zinc-400 ml-2">{r.email}</span>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-mono text-blue-600 dark:text-blue-400">{(r.similarity * 100).toFixed(0)}% match</span>
+                      {r.score != null && (
+                        <span className={`text-xs font-bold ${r.score >= 70 ? "text-emerald-600" : r.score >= 40 ? "text-amber-600" : "text-red-600"}`}>Score: {r.score}</span>
+                      )}
+                    </div>
+                  </div>
+                  {r.summary && <p className="text-xs text-zinc-500 mt-1 line-clamp-2">{r.summary}</p>}
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {(r.skills || []).slice(0, 6).map((s: string) => (
+                      <span key={s} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">{s}</span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// SCORING RUBRIC MODAL
+// ============================================
+function ScoringRubricModal({ jobId, onClose }: { jobId: string; onClose: () => void }) {
+  const [criteria, setCriteria] = useState<{ name: string; weight: number; description: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`/api/scoring-rubric?jobId=${jobId}`);
+        const json = await res.json();
+        if (json.data?.criteria?.length) {
+          setCriteria(json.data.criteria);
+        } else {
+          setCriteria([
+            { name: "Technical Skills", weight: 30, description: "Relevant programming languages, frameworks, and tools" },
+            { name: "Experience", weight: 25, description: "Years and relevance of work experience" },
+            { name: "Education", weight: 15, description: "Degree relevance and institution quality" },
+            { name: "Culture Fit", weight: 15, description: "Communication style, team collaboration" },
+            { name: "Domain Knowledge", weight: 15, description: "Industry-specific knowledge and certifications" },
+          ]);
+        }
+      } catch {} finally { setLoading(false); }
+    })();
+  }, [jobId]);
+
+  const totalWeight = criteria.reduce((s, c) => s + c.weight, 0);
+
+  const save = async () => {
+    if (totalWeight !== 100) { setMsg(`Weights must sum to 100 (currently ${totalWeight})`); return; }
+    setSaving(true);
+    setMsg("");
+    try {
+      const res = await fetch("/api/scoring-rubric", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId, criteria }),
+      });
+      const json = await res.json();
+      setMsg(res.ok ? "Rubric saved successfully!" : json.error || "Failed to save");
+    } catch { setMsg("Error saving rubric"); } finally { setSaving(false); }
+  };
+
+  const addCriterion = () => setCriteria([...criteria, { name: "", weight: 0, description: "" }]);
+  const removeCriterion = (i: number) => setCriteria(criteria.filter((_, idx) => idx !== i));
+  const updateCriterion = (i: number, field: string, value: any) => {
+    const updated = [...criteria];
+    (updated[i] as any)[field] = field === "weight" ? Number(value) || 0 : value;
+    setCriteria(updated);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-5 border-b border-zinc-100 dark:border-zinc-800">
+          <div>
+            <h3 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">Scoring Rubric</h3>
+            <p className="text-xs text-zinc-500 mt-0.5">Define custom weighted criteria for AI scoring</p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition cursor-pointer">
+            <svg className="w-5 h-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-16"><div className="w-6 h-6 border-2 border-amber-300 border-t-amber-600 rounded-full animate-spin" /></div>
+        ) : (
+          <div className="p-5 overflow-y-auto flex-1 space-y-4">
+            <div className="space-y-3">
+              {criteria.map((c, i) => (
+                <div key={i} className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-3 space-y-2">
+                  <div className="flex gap-2">
+                    <input
+                      value={c.name}
+                      onChange={(e) => updateCriterion(i, "name", e.target.value)}
+                      placeholder="Criterion name"
+                      className="flex-1 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 py-2 text-sm outline-none text-zinc-800 dark:text-zinc-200"
+                    />
+                    <input
+                      type="number"
+                      value={c.weight}
+                      onChange={(e) => updateCriterion(i, "weight", e.target.value)}
+                      min={0}
+                      max={100}
+                      className="w-20 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 py-2 text-sm text-center outline-none text-zinc-800 dark:text-zinc-200"
+                    />
+                    <span className="self-center text-xs text-zinc-400">%</span>
+                    <button onClick={() => removeCriterion(i)} className="text-red-400 hover:text-red-600 p-1 cursor-pointer">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
+                  </div>
+                  <input
+                    value={c.description}
+                    onChange={(e) => updateCriterion(i, "description", e.target.value)}
+                    placeholder="Description (what to evaluate)"
+                    className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 py-1.5 text-xs outline-none text-zinc-600 dark:text-zinc-400"
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between">
+              <button onClick={addCriterion} className="text-xs font-semibold text-violet-600 dark:text-violet-400 hover:underline cursor-pointer">+ Add Criterion</button>
+              <span className={`text-xs font-bold ${totalWeight === 100 ? "text-emerald-600" : "text-red-500"}`}>
+                Total: {totalWeight}% {totalWeight === 100 ? "✓" : `(need ${100 - totalWeight}% more)`}
+              </span>
+            </div>
+
+            {msg && (
+              <p className={`text-xs ${msg.includes("success") ? "text-emerald-600" : "text-red-500"}`}>{msg}</p>
+            )}
+
+            <button
+              onClick={save}
+              disabled={saving || totalWeight !== 100}
+              className="w-full rounded-xl bg-amber-600 hover:bg-amber-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50 transition cursor-pointer"
+            >
+              {saving ? "Saving..." : "Save Rubric"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// AI ANALYTICS / GOVERNANCE MODAL
+// ============================================
+function AIAnalyticsModal({ onClose }: { onClose: () => void }) {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [days, setDays] = useState(30);
+
+  const load = async (d: number) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/ai-analytics?days=${d}`);
+      const json = await res.json();
+      if (res.ok) setData(json.data);
+    } catch {} finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(days); }, [days]);
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl w-full max-w-4xl mx-4 max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-5 border-b border-zinc-100 dark:border-zinc-800">
+          <div>
+            <h3 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">AI Governance & Monitoring</h3>
+            <p className="text-xs text-zinc-500 mt-0.5">Track AI performance, costs, and reliability across all features</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {[7, 30, 90].map((d) => (
+              <button
+                key={d}
+                onClick={() => setDays(d)}
+                className={`px-3 py-1 text-xs font-semibold rounded-lg transition cursor-pointer ${days === d ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300" : "text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"}`}
+              >{d}d</button>
+            ))}
+            <button onClick={onClose} className="rounded-lg p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition cursor-pointer ml-2">
+              <svg className="w-5 h-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-16"><div className="w-6 h-6 border-2 border-emerald-300 border-t-emerald-600 rounded-full animate-spin" /></div>
+        ) : !data ? (
+          <div className="p-8 text-center text-zinc-400">No AI analytics data yet</div>
+        ) : (
+          <div className="p-5 overflow-y-auto flex-1 space-y-6">
+            {/* Overview cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                { label: "Total AI Calls", value: data.overview.totalCalls, color: "blue" },
+                { label: "Success Rate", value: `${data.overview.successRate}%`, color: "emerald" },
+                { label: "Avg Latency", value: `${data.overview.avgLatency}ms`, color: "amber" },
+                { label: "P95 Latency", value: `${data.overview.p95Latency}ms`, color: "red" },
+              ].map((m) => (
+                <div key={m.label} className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-4 text-center">
+                  <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">{m.value}</div>
+                  <div className="text-xs text-zinc-500 mt-1">{m.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* By Provider */}
+            <div>
+              <h4 className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mb-2">By Provider</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {Object.entries(data.byProvider).map(([provider, stats]: [string, any]) => (
+                  <div key={provider} className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 capitalize">{provider}</span>
+                      <span className="text-xs text-zinc-400">{stats.calls} calls</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-zinc-500">
+                      <span className="text-emerald-600">{stats.success} ok</span>
+                      <span className="text-red-500">{stats.calls - stats.success} errors</span>
+                      <span>{stats.avgLatency}ms avg</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* By Feature */}
+            <div>
+              <h4 className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mb-2">By Feature</h4>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-zinc-200 dark:border-zinc-700">
+                    <th className="text-left py-2 text-xs font-bold text-zinc-500 uppercase">Feature</th>
+                    <th className="text-right py-2 text-xs font-bold text-zinc-500 uppercase">Calls</th>
+                    <th className="text-right py-2 text-xs font-bold text-zinc-500 uppercase">Success</th>
+                    <th className="text-right py-2 text-xs font-bold text-zinc-500 uppercase">Avg Latency</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                  {Object.entries(data.byFeature).map(([feature, stats]: [string, any]) => (
+                    <tr key={feature}>
+                      <td className="py-2 text-zinc-700 dark:text-zinc-300 font-medium">{feature}</td>
+                      <td className="py-2 text-right text-zinc-500">{stats.calls}</td>
+                      <td className="py-2 text-right text-emerald-600">{stats.success}</td>
+                      <td className="py-2 text-right text-zinc-500">{stats.avgLatency}ms</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Recent Errors */}
+            {data.recentErrors?.length > 0 && (
+              <div>
+                <h4 className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mb-2">Recent Errors</h4>
+                <div className="space-y-2">
+                  {data.recentErrors.slice(0, 5).map((e: any, i: number) => (
+                    <div key={i} className="rounded-lg border border-red-200 dark:border-red-800/30 bg-red-50/50 dark:bg-red-950/10 p-3 text-xs">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-semibold text-red-700 dark:text-red-400">{e.feature} ({e.provider})</span>
+                        <span className="text-zinc-400">{new Date(e.timestamp).toLocaleString()}</span>
+                      </div>
+                      <p className="text-red-600 dark:text-red-400">{e.error}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// WORKFLOW RESULT MODAL
+// ============================================
+function WorkflowResultModal({ data, onClose }: { data: any; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xl w-full max-w-3xl mx-4 max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-5 border-b border-zinc-100 dark:border-zinc-800">
+          <div>
+            <h3 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+              AI Workflow Results
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300">Agentic</span>
+            </h3>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              Processed {data.processedCount} candidate{data.processedCount !== 1 ? "s" : ""} in {(data.totalDurationMs / 1000).toFixed(1)}s
+            </p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition cursor-pointer">
+            <svg className="w-5 h-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div className="p-5 overflow-y-auto flex-1 space-y-4">
+          {Object.entries(data.results).map(([resumeId, result]: [string, any]) => (
+            <div key={resumeId} className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+              <div className={`px-4 py-3 text-sm font-semibold flex items-center justify-between ${
+                result.success ? "bg-emerald-50 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-200" : "bg-red-50 dark:bg-red-950/20 text-red-800 dark:text-red-200"
+              }`}>
+                <span>Resume: {resumeId.slice(0, 8)}...</span>
+                <span className="text-xs">{result.success ? `${(result.durationMs / 1000).toFixed(1)}s` : result.error}</span>
+              </div>
+              {result.success && result.steps?.length > 0 && (
+                <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                  {result.steps.map((step: any, i: number) => (
+                    <div key={i} className="px-4 py-2.5 text-xs">
+                      <div className="flex items-center gap-3">
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${step.status === "success" ? "bg-emerald-500" : "bg-red-500"}`} />
+                        <span className="font-medium text-zinc-700 dark:text-zinc-300 w-44">{step.tool.replace(/_/g, " ")}</span>
+                        <span className="text-zinc-400">{step.durationMs}ms</span>
+                      </div>
+                      {/* Show email draft inline */}
+                      {step.tool === "draft_email" && step.status === "success" && step.output?.subject && (
+                        <div className="mt-2 ml-4 rounded-lg border border-violet-200 dark:border-violet-800 bg-violet-50/50 dark:bg-violet-950/20 p-3">
+                          <div className="font-semibold text-violet-800 dark:text-violet-300 mb-1">Subject: {step.output.subject}</div>
+                          <div className="text-zinc-600 dark:text-zinc-400 whitespace-pre-wrap">{step.output.body}</div>
+                          <div className="mt-1.5 text-[10px] text-violet-500">Saved as email template — find it in the Email tab</div>
+                        </div>
+                      )}
+                      {/* Show pipeline decision */}
+                      {step.tool === "decide_pipeline_stage" && step.status === "success" && step.output?.stage && (
+                        <div className="mt-2 ml-4 text-zinc-600 dark:text-zinc-400">
+                          Stage: <span className="font-semibold capitalize">{step.output.stage}</span> — {step.output.reasoning}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {result.success && result.summary && (
+                <div className="px-4 py-3 bg-zinc-50 dark:bg-zinc-800/50 text-xs text-zinc-600 dark:text-zinc-400 whitespace-pre-wrap">
+                  {result.summary}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
