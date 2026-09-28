@@ -1,6 +1,6 @@
 # AI-Powered Resume ATS & Matcher
 
-An advanced, premium Applicant Tracking System (ATS) built with **Next.js**, **Supabase**, and **OpenAI**. The application ingests, parses, analyzes, scores, and filters resumes, allowing recruiters and hiring managers to manage candidates at scale using either deep AI evaluation or rapid keyword-based local matching.
+An advanced, premium Applicant Tracking System (ATS) built with **Next.js**, **Supabase**, **OpenAI**, and **Anthropic Claude**. The application ingests, parses, analyzes, scores, and filters resumes, allowing recruiters and hiring managers to manage candidates at scale using multi-model AI evaluation, semantic search, agentic workflows, and an AI copilot.
 
 ---
 
@@ -14,6 +14,24 @@ An advanced, premium Applicant Tracking System (ATS) built with **Next.js**, **S
   - **AI-Powered Screening (ON):** Uses **OpenAI GPT-4o-mini** to extract high-fidelity structured profile details (full name, email, phone, location, skills, experience timeline, education, projects, certifications, and publications) and perform detailed alignment evaluation.
   - **Local Keyword Matching (OFF):** Performs local keyword and skill matching using `calculateMatchScore()`, offering near-instant scoring and strengths/weaknesses breakdowns without calling external APIs.
   - **Interactive Toggles:** Toggle AI-powered screening on/off during campaign creation or directly inside the campaign dashboard. Switching modes automatically re-scores all candidates.
+- **Claude AI Integration (Anthropic):**
+  - **Candidate Comparison:** Deep comparative ranking of 2–5 candidates using Claude Sonnet 4 with verdicts, risk factors, and hiring recommendations.
+  - **AI Copilot:** Natural language Q&A for recruiters — ask questions about your candidate pipeline (e.g., "Show me Python developers with 5+ years experience") and get markdown-formatted answers powered by Claude.
+  - **Candidate Analysis:** Flexible AI-driven analysis with structured JSON or text responses for any candidate context.
+- **RAG Semantic Search:**
+  - **Natural Language Search:** Find candidates using plain English queries (e.g., "DevOps engineers with Kubernetes expertise") instead of exact keyword matches.
+  - **Vector Embeddings:** Resumes are embedded into 1536-dimensional vectors using OpenAI `text-embedding-3-small` and stored via PostgreSQL `pgvector`.
+  - **Similarity Ranking:** Results are ranked by cosine similarity with configurable thresholds and result limits.
+- **Agentic Workflow Engine:**
+  - **Autonomous Multi-Step Pipeline:** An LLM agent (GPT-4o-mini) orchestrates the full candidate processing flow — parse resume, score candidate, generate screening questions, embed for search, decide pipeline stage, and draft personalized outreach emails.
+  - **Batch Processing:** Execute the complete pipeline on up to 10 resumes per run with step-by-step results and timing.
+  - **Function Calling:** Uses 6 specialized tools with state management for reliable sequential execution.
+- **Custom Scoring Rubric:**
+  - Define weighted evaluation criteria per job (e.g., "Python experience: 20%", "Leadership: 15%") with validation that weights sum to 100.
+  - Ensures consistent, objective candidate evaluation standards across the team.
+- **AI Governance & Analytics:**
+  - **Comprehensive Logging:** Every AI API call is tracked with provider, model, feature, latency, token counts, cost, and success status across OpenAI, Claude, and Gemini.
+  - **Analytics Dashboard:** Usage metrics by provider/feature/model, latency stats (average, P95), token consumption, daily trends, error tracking, and cost breakdowns over configurable time periods.
 - **AI Voice Screening Calls (Vapi + Twilio):**
   - **Automated Candidate Calls:** Initiate AI-powered phone calls to candidates directly from the campaign dashboard to gather missing information (sponsorship status, availability, salary expectations, etc.).
   - **Customizable Questions:** Configure screening questions per call — choose from presets or add custom questions on the fly.
@@ -40,23 +58,25 @@ An advanced, premium Applicant Tracking System (ATS) built with **Next.js**, **S
 
 ## 🛠 Tech Stack
 
-| Component              | Technology                                                            | Description                                                 |
-| :--------------------- | :-------------------------------------------------------------------- | :---------------------------------------------------------- |
-| **Frontend/Framework** | [Next.js 16 (App Router)](https://nextjs.org/)                        | Core application environment & routing API endpoints.         |
-| **Styling**            | [TailwindCSS 4](https://tailwindcss.com/) & Vanilla CSS               | Premium dark-themed UI components and layouts.                |
-| **Database & Auth**    | [Supabase Postgres](https://supabase.com/)                            | Persistent storage, Auth handling, and custom RLS policies.   |
-| **Storage**            | [Supabase Storage](https://supabase.com/docs/guides/storage)          | Resume file hosting under user-scoped structures.             |
-| **AI Processing**      | [OpenAI GPT-4o-mini SDK](https://openai.com/)                         | Structured resume parsing and objective scoring.              |
-| **Voice AI**           | [Vapi AI](https://vapi.ai/)                                           | AI voice agent for automated candidate screening calls.       |
-| **Telephony**          | [Twilio](https://twilio.com/)                                         | Outbound phone number and call infrastructure via Vapi.       |
-| **Mail Services**      | [Resend](https://resend.com/) & [Nodemailer](https://nodemailer.com/) | HTML notification dispatchers.                                |
-| **Libraries**          | `pdf-parse`, `mammoth`, `jszip`                                       | Raw text extraction from PDFs, DOCXs, and ZIP files.          |
+| Component              | Technology                                                            | Description                                                  |
+| :--------------------- | :-------------------------------------------------------------------- | :----------------------------------------------------------- |
+| **Frontend/Framework** | [Next.js 16 (App Router)](https://nextjs.org/)                        | Core application environment & routing API endpoints.        |
+| **Styling**            | [TailwindCSS 4](https://tailwindcss.com/) & Vanilla CSS               | Premium dark-themed UI components and layouts.               |
+| **Database & Auth**    | [Supabase Postgres + pgvector](https://supabase.com/)                 | Persistent storage, Auth, RLS policies, and vector search.   |
+| **Storage**            | [Supabase Storage](https://supabase.com/docs/guides/storage)          | Resume file hosting under user-scoped structures.            |
+| **AI Processing**      | [OpenAI GPT-4o-mini SDK](https://openai.com/)                         | Structured resume parsing, scoring, and agent orchestration. |
+| **AI Analysis**        | [Anthropic Claude Sonnet 4](https://anthropic.com/)                   | Candidate comparison, copilot Q&A, and deep analysis.        |
+| **Vector Embeddings**  | [OpenAI text-embedding-3-small](https://openai.com/)                  | Semantic search via 1536-dimensional resume embeddings.       |
+| **Voice AI**           | [Vapi AI](https://vapi.ai/)                                           | AI voice agent for automated candidate screening calls.      |
+| **Telephony**          | [Twilio](https://twilio.com/)                                         | Outbound phone number and call infrastructure via Vapi.      |
+| **Mail Services**      | [Resend](https://resend.com/) & [Nodemailer](https://nodemailer.com/) | HTML notification dispatchers.                               |
+| **Libraries**          | `pdf-parse`, `mammoth`, `jszip`                                       | Raw text extraction from PDFs, DOCXs, and ZIP files.         |
 
 ---
 
 ## 🔑 Environment Variables Setup
 
-Create a `.env.local` file in the root of the `my-app` directory and populate it with the following configuration keys:
+Create a `.env.local` file in the project root and populate it with the following configuration keys:
 
 ```ini
 # Supabase Configuration
@@ -65,7 +85,10 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key # Required for background workers to bypass RLS
 
 # OpenAI Configuration
-OPENAI_API_KEY=your-openai-api-key # Used for parsing resumes via OpenAI SDK
+OPENAI_API_KEY=your-openai-api-key # Used for parsing, scoring, embeddings, and agent orchestration
+
+# Anthropic Claude Configuration
+ANTHROPIC_API_KEY=your-anthropic-api-key # Used for candidate comparison, copilot, and analysis
 
 # Vapi AI Configuration (Voice Screening Calls)
 VAPI_API_KEY=your-vapi-private-api-key # Private key from Vapi dashboard
@@ -152,6 +175,42 @@ Stores AI voice screening call records, transcripts, and extracted answers.
 - `ended_reason` (TEXT, e.g. `'assistant-ended-call'`, `'customer-ended-call'`)
 - `created_at` / `updated_at` (TIMESTAMPTZ)
 
+### 5. `ai_logs` Table
+
+Tracks all AI API calls for governance, cost analysis, and performance monitoring.
+
+- `id` (UUID, Primary Key)
+- `owner_id` (UUID, references `auth.users`)
+- `provider` (TEXT: `'openai'`, `'claude'`, `'gemini'`)
+- `model` (TEXT, e.g. `'gpt-4o-mini'`, `'claude-sonnet-4-20250514'`)
+- `feature` (TEXT, e.g. `'parse'`, `'score'`, `'copilot'`, `'compare'`)
+- `success` (BOOLEAN)
+- `latency_ms` (INTEGER)
+- `tokens_in` / `tokens_out` (INTEGER)
+- `cost` (NUMERIC)
+- `error` (TEXT, nullable)
+- `created_at` (TIMESTAMPTZ)
+
+### 6. `resume_embeddings` Table
+
+Stores vector embeddings for semantic search using pgvector.
+
+- `id` (UUID, Primary Key)
+- `resume_id` (UUID, references `resumes.id`)
+- `embedding` (VECTOR(1536), OpenAI embedding vector)
+- `content` (TEXT, searchable text used to generate the embedding)
+- `created_at` (TIMESTAMPTZ)
+
+### 7. `scoring_rubrics` Table
+
+Stores custom weighted scoring criteria per job.
+
+- `id` (UUID, Primary Key)
+- `job_id` (UUID, references `jobs.id`)
+- `owner_id` (UUID, references `auth.users`)
+- `criteria` (JSONB, array of `{ name, weight, description }`)
+- `created_at` / `updated_at` (TIMESTAMPTZ)
+
 ### Custom ENUM Types
 
 - `visa_status_enum` (Values: `'citizen'`, `'green_card'`, `'h1b'`, `'opt'`, `'stem_opt'`, `'cpt'`)
@@ -161,7 +220,7 @@ Stores AI voice screening call records, transcripts, and extracted answers.
 
 ## 🛠 Deep Dive: How the Core Integrations Work
 
-### 🧬 OpenAI Integration ([lib/openai.ts](my-app/lib/openai.ts))
+### 🧬 OpenAI Integration ([lib/openai.ts](lib/openai.ts))
 
 1. **Input Truncation:** Sanitizes text extraction, removing null characters and truncating the input to the first 20,000 characters to prevent token overflow.
 2. **Strict JSON Mode:** Invokes `gpt-4o-mini` with `response_format: { type: "json_object" }` ensuring structured output matches our exact TS types.
@@ -171,7 +230,7 @@ Stores AI voice screening call records, transcripts, and extracted answers.
 
 ### 🤖 Dual-Mode Screening Mechanics
 
-- **Campaign Encoding ([lib/campaign.ts](my-app/lib/campaign.ts)):**
+- **Campaign Encoding ([lib/campaign.ts](lib/campaign.ts)):**
   The `jobs.description` column encodes the original job description, its extracted keywords, and the `aiScreening` state in a single string delimited by special metadata blocks:
   ```
   [Description Text]
@@ -185,7 +244,7 @@ Stores AI voice screening call records, transcripts, and extracted answers.
   - If **Enabled (ON)**: Candidates' statuses are reset to `uploaded` and screened concurrently using background workers calling OpenAI.
   - If **Disabled (OFF)**: Candidates' profiles are matched locally against the campaign's extracted keywords instantly, recalculating scores, strengths, and weaknesses without delay or API overhead.
 
-### 📞 Vapi AI Voice Screening ([lib/vapi.ts](my-app/lib/vapi.ts))
+### 📞 Vapi AI Voice Screening ([lib/vapi.ts](lib/vapi.ts))
 
 1. **Dynamic Prompt Generation:** Each call generates a custom system prompt based on the candidate's name and the configured screening questions.
 2. **Outbound Call Flow:**
@@ -201,7 +260,25 @@ Stores AI voice screening call records, transcripts, and extracted answers.
    - **Structured Data Plan:** Extracts answers as key-value JSON from the transcript.
    - **Success Evaluation:** Pass/fail assessment of whether the call achieved its objectives.
 
-### ✉️ Resend & Mail Integration ([lib/mail.ts](my-app/lib/mail.ts))
+### 🧠 Claude AI Integration ([lib/claude.ts](lib/claude.ts))
+
+1. **Multi-Function Interface:** Exposes three core functions — `analyzeWithClaude()` for general analysis, `compareWithClaude()` for ranked candidate comparisons, and `copilotQuery()` for natural language Q&A.
+2. **Candidate Comparison:** Accepts 2–5 candidates, analyzes them against job requirements, and returns ranked assessments with verdicts, risk factors, and hiring recommendations.
+3. **AI Copilot:** Recruiters ask natural language questions about their pipeline; Claude responds with markdown-formatted, context-aware answers.
+
+### 🔍 RAG Semantic Search ([lib/embeddings.ts](lib/embeddings.ts))
+
+1. **Embedding Generation:** Converts parsed resume JSON (skills, experience, education, projects) into searchable text via `buildEmbeddingText()`, then generates 1536-dimensional vectors using OpenAI `text-embedding-3-small`.
+2. **Vector Storage:** Embeddings are stored in Supabase using the `pgvector` extension for efficient cosine similarity search.
+3. **Query Flow:** Search queries are embedded at request time and matched against stored resume vectors via a PostgreSQL RPC function, returning ranked candidates with similarity scores.
+
+### 🤖 Agentic Workflow ([lib/agent-workflow.ts](lib/agent-workflow.ts))
+
+1. **Autonomous Pipeline:** An LLM agent (GPT-4o-mini with function calling) orchestrates 6 tools in sequence: parse resume, score candidate, generate screening questions, embed for search, decide pipeline stage, and draft outreach email.
+2. **State Management:** Each step's output feeds into the next via a shared state object, enabling context-aware decisions (e.g., pipeline stage is based on the score).
+3. **Batch Execution:** The `/api/agent-workflow` endpoint processes up to 10 resumes per run, returning step-by-step results with timing for each.
+
+### ✉️ Resend & Mail Integration ([lib/mail.ts](lib/mail.ts))
 
 1. **Custom Domain Dispatch:** Deliveries use the verified sender address (`notifications@patternix.app`) to ensure bypass of sandbox limitations.
 2. **Consolidation Check (`checkAndSendJobNotification`):**
@@ -212,7 +289,7 @@ Stores AI voice screening call records, transcripts, and extracted answers.
 
 ### 📂 Supabase Client & Storage Integration
 
-- Client initialization is split between `lib/supabase/browser.ts` (client-side cookies) and `lib/supabase/server.ts` (Next.js server environment).
+- Client initialization is split between ``lib/supabase/browser.ts`` (client-side cookies) and ``lib/supabase/server.ts`` (Next.js server environment).
 - During background parsing, the system instantiates a `@supabase/supabase-js` administration client using the `SUPABASE_SERVICE_ROLE_KEY` to bypass standard RLS restrictions.
 
 ---
@@ -222,17 +299,18 @@ Stores AI voice screening call records, transcripts, and extracted answers.
 1. **Clone the repository and install dependencies:**
 
    ```bash
-   cd my-app
+   git clone https://github.com/ichandan2151/resume-ats.git
+   cd resume-ats
    npm install
    ```
 
 2. **Configure Supabase:**
-   Create the necessary tables (`profiles`, `jobs`, `resumes`, `voice_calls`) in your Supabase database instance. Run the migration at `my-app/supabase/migrations/voice_calls.sql`.
+   Create the necessary tables (`profiles`, `jobs`, `resumes`, `voice_calls`, `ai_logs`, `resume_embeddings`, `scoring_rubrics`) in your Supabase database instance. Run the migrations in `supabase/migrations/`.
 
-3. **Set up Vapi for voice calls:**
-   - Create a [Vapi](https://vapi.ai) account and get your private API key.
-   - Import a Twilio phone number into Vapi and copy the phone number ID.
-   - Add `VAPI_API_KEY` and `VAPI_PHONE_NUMBER_ID` to `.env.local`.
+3. **Set up API keys:**
+   - Add `OPENAI_API_KEY` for resume parsing, scoring, embeddings, and agent workflows.
+   - Add `ANTHROPIC_API_KEY` for Claude-powered candidate comparison, copilot, and analysis.
+   - Create a [Vapi](https://vapi.ai) account and add `VAPI_API_KEY` and `VAPI_PHONE_NUMBER_ID` for voice screening.
 
 4. **For local webhook testing (optional):**
    ```bash
